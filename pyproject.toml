@@ -9,7 +9,13 @@ description = "AgentScout — observer of the Technocore agent network: signed c
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
-dependencies = ["cryptography>=42", "anthropic>=0.125", "pydantic>=2"]
+dependencies = [
+    # Pinned on purpose: a rebuild must not pull code nobody reviewed. Bump deliberately; Dependabot alerts on CVEs.
+    "cryptography==50.0.0",
+    "pydantic==2.13.4",
+    "anthropic==1.0.0; python_version >= '3.10'",    # what the Docker image (python:3.12) runs
+    "anthropic==0.125.0; python_version < '3.10'",   # local dev on macOS system Python 3.9
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5"]

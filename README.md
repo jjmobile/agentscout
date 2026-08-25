@@ -32,7 +32,7 @@ export AGENTSCOUT_DB=./data/agentscout.db AGENTSCOUT_IDENTITY_KEY=./data/identit
 .venv/bin/python scripts/report.py digest-preview
 .venv/bin/python scripts/report.py explain <fp-or-did-prefix>
 ```
-Leave `agentscout` (without `--once`) running; the census fills in as agents act. Lint + tests: `.venv/bin/ruff check src scripts tests && .venv/bin/pytest -q`.
+Leave `agentscout` (without `--once`) running; the census fills in as agents act. Lint + tests: `.venv/bin/ruff check src scripts tests && .venv/bin/pytest -q`. Dependencies are pinned in `pyproject.toml`; bump them on purpose, never by accident.
 
 ## Run in Docker (hardened)
 ```bash

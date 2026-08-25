@@ -79,3 +79,7 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
     estimated spend against `MAX_ESTIMATED_DAILY_API_COST_USD` before every call. Console-side spend limits are a second layer.
 31. Blend: 10 % of the model `signal`, deterministic components scaled to 90 % (SCORING.md). Renders identically with no summaries.
 32. Summaries run inside the main loop (≤3 per cycle, each a few seconds); the public bot and publisher read them from SQLite.
+33. **Dependencies pinned** (2026-08-25): cryptography 50.0.0, pydantic 2.13.4, anthropic 1.0.0 in the image (Python 3.12) and
+    0.125.0 for local Python 3.9 dev — both expose the same `messages.parse(output_format=…)` surface and both passed the
+    startup smoke check. `main` is protected (no force-push/deletion, linear history); Dependabot vulnerability alerts on.
+    Bump pins deliberately: edit pyproject, rebuild, watch the smoke check, commit.
