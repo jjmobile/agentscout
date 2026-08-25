@@ -134,3 +134,16 @@ def test_did_note_has_no_secrets_and_is_single_line(server, client, storage, tmp
     v = pub.did_note_value()
     seed = open(s.identity_key_path).read().strip()
     assert ident.did in v and seed not in v and "\n" not in v and "name:AgentScout" in v
+
+
+def test_posted_seq_from_text_reply_or_readback(server, client, storage, tmp_path):
+    from agentscout.publisher import Publisher as P
+    assert P._seq_from_post_body("# room d-x  messages 1  range 1..7\n!! UNTRUSTED\n[7] ...") == 7
+    assert P._seq_from_post_body("ok") is None
+    s, ident, pub = make(server, client, storage, tmp_path)
+    marker = "AGENTSCOUT DIGEST 2026-08-25"
+    client._fetch = PostCapture(server, [(200, {}, "ok")])
+    server.route(f"/r/{s.feed_room}?format=json&limit=50", body=room_json(s.feed_room, [msg(4, T(0), ident.did, marker, 1)]))
+    storage.enqueue(s.feed_room, "digest", marker, marker, T(0))
+    assert pub.post_signed_line(storage.outbox_pending()[0], NOW) == "POSTED"
+    assert storage.outbox_has(s.feed_room, marker)["posted_seq"] == 4

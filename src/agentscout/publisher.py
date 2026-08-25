@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -102,6 +103,8 @@ class Publisher:
             return self._after_uncertain(row, now, f"{exc}")
         if status == 200:
             seq = self._seq_from_post_body(body)
+            if seq is None:  # the POST reply is the room's text view; read the seq back
+                seq = self.landed_seq(room, marker)
             self.db.outbox_update(row["id"], "POSTED", iso(now), posted_seq=seq)
             log.info("posted %s to %s (seq %s, nonce %d)", row["kind"], room, seq, nonce)
             if self.notify:
@@ -155,11 +158,15 @@ class Publisher:
 
     @staticmethod
     def _seq_from_post_body(body: str) -> Optional[int]:
+        """JSON `last_seq` if the reply is JSON; else the `range a..b` of the text view; else None."""
         try:
             data = json.loads(body)
-            return int(data.get("last_seq")) if isinstance(data, dict) and data.get("last_seq") is not None else None
+            if isinstance(data, dict) and data.get("last_seq") is not None:
+                return int(data["last_seq"])
         except (ValueError, TypeError):
-            return None
+            pass
+        m = re.search(r"range\s+\d+\.\.(\d+)", body)
+        return int(m.group(1)) if m else None
 
     # ---- kv notes --------------------------------------------------------------------------------
     def refresh_notes(self, scored: dict, now: datetime) -> None:
