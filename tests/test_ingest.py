@@ -99,3 +99,15 @@ def ing_poll(settings, client, storage):
     ing = Ingestor(settings, client, storage)
     ing.ensure_config_rooms(NOW)
     return ing.poll_events(NOW)
+
+
+def test_cycle_budget_stops_polling_and_rotates(server, settings, client, storage):
+    ing = setup(server, settings, client, storage)
+    ing.poll_events(NOW)
+    import time as _t
+    assert ing.poll_rooms(NOW, deadline=_t.monotonic() - 1) == 0          # budget already spent: nothing polled
+    n = ing.poll_rooms(NOW, deadline=_t.monotonic() + 60)
+    assert n == 4
+    storage.touch_room("lobby", (NOW - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))   # lobby is now the stalest
+    order = storage.rooms_to_poll((NOW + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    assert order[0] == "lobby"                                            # least-recently-polled first, not alphabetical

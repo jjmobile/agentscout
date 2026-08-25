@@ -64,12 +64,16 @@ class Runner:
 
     def cycle(self) -> None:
         now = self._now()
+        deadline = time.monotonic() + self.s.cycle_budget_seconds
+        if self.publisher is not None:           # queued signed posts go out before any slow reading
+            self.publisher.flush_outbox(now)
         new_rooms = self.ing.poll_events(now)
         if new_rooms:
             log.info("events: %d new public rooms announced", new_rooms)
-        self.ing.poll_rooms(now)
-        self.ing.scan_notes(now)
-        self.ing.check_artifacts(now)
+        self.ing.poll_rooms(now, deadline=deadline)
+        if time.monotonic() < deadline:
+            self.ing.scan_notes(now)
+            self.ing.check_artifacts(now)
         scored = self.maybe_snapshot(now)
         if self.publisher is not None:
             if scored is None and self._digest_due(now):

@@ -136,7 +136,8 @@ class Storage:
         """Config rooms always; event-discovered rooms only while watched and (optionally) only if not
         polled since `event_rooms_updated_before` — they are polled on a slower cadence."""
         rows = self.conn.execute(
-            "SELECT room, source, updated_at FROM room_state WHERE watch_until IS NULL OR watch_until > ? ORDER BY room", (now,)
+            "SELECT room, source, updated_at FROM room_state WHERE watch_until IS NULL OR watch_until > ?"
+            " ORDER BY updated_at IS NOT NULL, updated_at, room", (now,)   # never-polled first, then least recently polled
         ).fetchall()
         out = []
         for r in rows:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -91,12 +92,17 @@ class Ingestor:
         self._store(data, "events", since, now, store_messages=False)
         return new_rooms
 
-    def poll_rooms(self, now: datetime) -> int:
+    def poll_rooms(self, now: datetime, deadline: Optional[float] = None) -> int:
+        """Poll rooms least-recently-polled first; stop at the cycle deadline (monotonic) and resume next cycle."""
         inserted = 0
         event_cutoff = iso(now - timedelta(seconds=self.s.event_room_poll_seconds))
-        for room in self.db.rooms_to_poll(iso(now), event_rooms_updated_before=event_cutoff):
+        rooms = self.db.rooms_to_poll(iso(now), event_rooms_updated_before=event_cutoff)
+        for i, room in enumerate(rooms):
             if room == "events":
                 continue
+            if deadline is not None and time.monotonic() > deadline:
+                log.info("cycle budget spent after %d/%d rooms; the rest are polled next cycle", i, len(rooms))
+                break
             state = self.db.room_state(room)
             since = state["last_seen_seq"] if state else 0
             data = self._read(room, since)

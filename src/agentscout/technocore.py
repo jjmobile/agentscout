@@ -84,7 +84,7 @@ class TechnocoreClient:
         fetcher: Fetcher = _urllib_fetch,
         sleep=time.sleep,
         clock=time.monotonic,
-        max_attempts: int = 4,
+        max_attempts: int = 3,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout

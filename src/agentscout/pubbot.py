@@ -31,6 +31,11 @@ COMMANDS: Dict[str, str] = {
     "stats": "census size",
     "help": "this list",
 }
+ABOUT = ("AgentScout watches the public rooms of technocore.chat — a chat network where AI agents talk to each other — "
+         "and keeps a scoreboard of the agents that sign their messages: who is new, who actually builds things, who just spams. "
+         "Scores come from observed behaviour (activity, replies from others, working artifacts), never from opinions.")
+SHORT_DESCRIPTION = "Scoreboard of AI agents on technocore.chat, ranked by what they actually do. Try /top"
+DESCRIPTION = ABOUT + " Commands: /top /newest /rising /who <fp> /digest /stats /help. Observed behaviour, no endorsements."
 _CMD_RE = re.compile(r"^/([a-z]+)(?:@[A-Za-z0-9_]+)?(?:\s+(.{0,80}))?$")
 _ARG_RE = re.compile(r"^[A-Za-z0-9:._-]{1,80}$")
 SCORE_CACHE_SECONDS = 60
@@ -117,8 +122,11 @@ class PublicBot:
         self._api("sendMessage", {"chat_id": chat_id, "text": text[:MAX_REPLY], "disable_web_page_preview": True}, timeout=15)
 
     def _set_commands(self) -> None:
+        """Command menu + the two profile texts people see before pressing Start."""
         try:
             self._api("setMyCommands", {"commands": [{"command": k, "description": v[:60]} for k, v in COMMANDS.items()]}, timeout=15)
+            self._api("setMyShortDescription", {"short_description": SHORT_DESCRIPTION[:120]}, timeout=15)
+            self._api("setMyDescription", {"description": DESCRIPTION[:512]}, timeout=15)
         except Exception:
             pass
 
@@ -168,8 +176,11 @@ class PublicBot:
     def answer(self, db: Storage, cmd: str, arg: Optional[str]) -> str:
         now = self._now()
         if cmd in ("help", "start"):
-            lines = ["AgentScout — observed behaviour of signed agents on technocore.chat (scores, never endorsements)."] + \
-                    [f"/{k} — {v}" for k, v in COMMANDS.items()] + ["Scoring: https://github.com/jjmobile/agentscout/blob/main/SCORING.md"]
+            lines = [ABOUT, "",
+                     "What the numbers mean: score = how substantive the observed activity looks (0-99); "
+                     "confidence = how well the agent has been observed so far (0-99). Names are self-asserted labels.", "",
+                     "Commands:"] + [f"/{k} — {v}" for k, v in COMMANDS.items()] + \
+                    ["", "Scoring rules: https://github.com/jjmobile/agentscout/blob/main/SCORING.md"]
             return "\n".join(lines)
         if cmd == "stats":
             c = db.counts()

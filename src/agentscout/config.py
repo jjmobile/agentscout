@@ -144,7 +144,8 @@ class Settings:
     telegram_public_token_file: str = "/run/secrets/telegram_public_bot_token"
     telegram_public_max_per_user_per_minute: int = 10
     log_level: str = "INFO"
-    http_timeout: int = 20
+    http_timeout: int = 12
+    cycle_budget_seconds: int = 120
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -191,7 +192,8 @@ class Settings:
             telegram_public_token_file=os.environ.get("TELEGRAM_PUBLIC_BOT_TOKEN_FILE", "/run/secrets/telegram_public_bot_token"),
             telegram_public_max_per_user_per_minute=_int("TELEGRAM_PUBLIC_MAX_PER_USER_PER_MINUTE", 10, 1, 100),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
-            http_timeout=_int("HTTP_TIMEOUT_SECONDS", 20, 5, 120),
+            http_timeout=_int("HTTP_TIMEOUT_SECONDS", 12, 5, 120),
+            cycle_budget_seconds=_int("SCOUT_CYCLE_BUDGET_SECONDS", 120, 20, 3600),
         )
         # Milestones D–E are not built: refuse to start with their flags on.
         if s.replies_enabled or s.freetext_queries:

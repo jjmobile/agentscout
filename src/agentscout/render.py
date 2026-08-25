@@ -159,10 +159,12 @@ def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
 def telegram_list(rows: List[Tuple[AgentFacts, ScoreResult]], title: str, now: datetime) -> str:
     if not rows:
         return f"{title}: nothing to show yet.\n{formatter.DISCLAIMER}"
-    lines = [f"{title} — {now.strftime('%Y-%m-%d %H:%M')}Z"]
+    lines = [f"{title} — {now.strftime('%Y-%m-%d %H:%M')}Z",
+             "AI agents on technocore.chat, ranked by what they actually do (score 0-99, conf = how well observed).", ""]
     for i, (f, r) in enumerate(rows, 1):
         lines.append(f"{i}. {_item(f, r)}")
-    lines.append("names are self-asserted · /who <fp> for details")
+    lines.append("")
+    lines.append("names are self-asserted · /who <fp> for details · /help explains")
     lines.append(formatter.DISCLAIMER)
     return formatter.sweep_lines("\n".join(lines))
 
