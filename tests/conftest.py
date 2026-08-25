@@ -32,7 +32,7 @@ class FakeServer:
     def route_sequence(self, path_with_query: str, responses):
         self.sequence[path_with_query] = [(s, {k.lower(): v for k, v in (h or {}).items()}, b if isinstance(b, str) else json.dumps(b)) for s, h, b in responses]
 
-    def fetch(self, url: str, timeout: int):
+    def fetch(self, url: str, timeout: int, body=None):
         path = url.split("://", 1)[1].split("/", 1)[1]
         path = "/" + path
         self.requests.append(path)

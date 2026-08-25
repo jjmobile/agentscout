@@ -34,12 +34,15 @@ class RateLimited(TechnocoreError):
         self.body = body
 
 
-Fetcher = Callable[[str, int], Tuple[int, Dict[str, str], str]]
-"""(url, timeout) -> (status, lowercase headers, body text). Injected in tests."""
+Fetcher = Callable[..., Tuple[int, Dict[str, str], str]]
+"""(url, timeout[, body bytes]) -> (status, lowercase headers, body text). Injected in tests."""
 
 
-def _urllib_fetch(url: str, timeout: int) -> Tuple[int, Dict[str, str], str]:
-    req = urllib.request.Request(url, headers={"User-Agent": "agentscout/0.1 (+read-only observer)"})
+def _urllib_fetch(url: str, timeout: int, body: Optional[bytes] = None) -> Tuple[int, Dict[str, str], str]:
+    headers = {"User-Agent": "agentscout/0.1 (+network observer)"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST" if body is not None else "GET")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — host validated in config
             body = resp.read().decode("utf-8", "replace")
@@ -90,6 +93,7 @@ class TechnocoreClient:
         self.budget = ReadBudget(max_reads_per_minute, clock=clock, sleep=sleep)
         self.max_attempts = max_attempts
         self.reads = 0
+        self.writes = 0
 
     # ---- low level -------------------------------------------------------------------
 
@@ -115,7 +119,7 @@ class TechnocoreClient:
                 if attempt >= self.max_attempts:
                     raise TechnocoreError(f"GET {path}: {exc.__class__.__name__}") from exc
                 delay = min(30.0, 2.0 ** attempt) + random.uniform(0, 1)
-                log.warning("GET %s connection error (%s); retry %d in %.1fs", path, exc.__class__.__name__, attempt, delay)
+                log.info("GET %s connection error (%s); retry %d in %.1fs", path, exc.__class__.__name__, attempt, delay)
                 self._sleep(delay)
                 continue
             if status == 429:
@@ -129,7 +133,7 @@ class TechnocoreClient:
                 if attempt >= self.max_attempts:
                     raise TechnocoreError(f"GET {path}: HTTP {status}")
                 delay = min(30.0, 2.0 ** attempt) + random.uniform(0, 1)
-                log.warning("GET %s HTTP %d; retry %d in %.1fs", path, status, attempt, delay)
+                log.info("GET %s HTTP %d; retry %d in %.1fs", path, status, attempt, delay)
                 self._sleep(delay)
                 continue
             return status, body
@@ -218,6 +222,50 @@ class TechnocoreClient:
         if status != 200:
             raise TechnocoreError(f"read /kv/{ns}/{key}: HTTP {status}")
         return strip_banner(body)
+
+    # ---- write lane (Milestone B) ---------------------------------------------------------
+
+    def post(self, path: str, body: dict) -> Tuple[int, str]:
+        """POST JSON once. 429 is waited out and retried (the write did not happen); 5xx/timeouts are
+        returned/raised to the caller — a signed write may have landed, so the caller decides."""
+        url = self._url(path)
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        attempt = 0
+        while True:
+            attempt += 1
+            self.budget.acquire()
+            self.writes += 1
+            try:
+                status, headers, text = self._fetch(url, self.timeout, data)
+            except (urllib.error.URLError, OSError, TimeoutError) as exc:
+                raise TechnocoreError(f"POST {path}: {exc.__class__.__name__}") from exc
+            if status == 429 and attempt < self.max_attempts:
+                wait = self._retry_after(headers, text)
+                log.warning("POST %s 429; waiting %.1fs", path, wait)
+                self._sleep(wait)
+                continue
+            return status, text
+
+    def post_signed(self, room: str, did: str, sig: str, nonce: int, text: str) -> Tuple[int, str]:
+        self._check_name(room, "room")
+        return self.post(f"/r/{room}", {"did": did, "sig": sig, "nonce": str(nonce), "text": text})
+
+    def write_note(self, ns: str, key: str, value: str, if_value: Optional[str] = None, if_absent: bool = False) -> Tuple[int, str]:
+        self._check_name(ns, "namespace")
+        self._check_name(key, "key")
+        body: Dict[str, object] = {"value": value}
+        if if_value is not None:
+            body["if"] = if_value
+        if if_absent:
+            body["if_absent"] = True
+        return self.post(f"/kv/{ns}/{key}", body)
+
+    def claim_room(self, room: str, did: str) -> Tuple[int, str]:
+        """GET /kv/room-owners/<d-room>/set/<did>?if_absent=1 — the documented ownership claim."""
+        self._check_name(room, "room")
+        if not room.startswith("d-"):
+            raise ValueError("only d- rooms can be owned")
+        return self.get(f"/kv/room-owners/{room}/set/{urllib.parse.quote(did, safe='')}", {"if_absent": 1})
 
 
 def strip_banner(body: str) -> str:

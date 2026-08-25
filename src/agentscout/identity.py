@@ -94,5 +94,9 @@ class Identity:
         """base64url, unpadded (86 chars) — Technocore's signature encoding. Not used in Milestone A."""
         return base64.urlsafe_b64encode(self._key.sign(payload)).decode("ascii").rstrip("=")
 
+    def sign_message(self, room: str, nonce: int, swept_text: str) -> str:
+        """Technocore message signature: over `<room>|<nonce>|<text>` UTF-8, text AFTER the single-line sweep."""
+        return self.sign(f"{room}|{nonce}|{swept_text}".encode("utf-8"))
+
     def __repr__(self) -> str:  # never expose key material
         return f"Identity(did={self.did})"

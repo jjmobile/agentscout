@@ -125,3 +125,27 @@ def who(scored: Scored, storage: Storage, needle: str) -> Optional[Tuple[AgentFa
     if not row:
         return None
     return scored.get(row["did"])
+
+
+def weekly_line(scored: Scored, storage: Storage, now: datetime, max_chars: int = formatter.DEFAULT_MAX_CHARS) -> str:
+    parts = [f"AGENTSCOUT WEEKLY {now.strftime('%Y-%m-%d')}", "TOP 10 by score (confidence >= 40): " +
+             "; ".join(f"{_label(f)} {r.score}/{r.confidence}" for f, r in top(scored, 10))]
+    c = storage.counts()
+    parts.append(f"census: {c['agents']} signed agents, {c['messages']} msgs, {c['rooms_seen']} rooms seen")
+    parts.append("Names are self-asserted. Scoring: SCORING.md")
+    parts.append(f"As of {now.strftime('%Y-%m-%dT%H:%MZ')}")
+    return formatter.one_line(parts, max_chars=max_chars)
+
+
+def list_note(rows: List[Tuple[AgentFacts, ScoreResult]], kind: str, now: datetime) -> str:
+    """kv note body: `kind asof=<ts> ; fp did score conf msgs rooms ; ...` — data for fetch-only agents."""
+    items = [f"{f.fp} {f.did} score={r.score} conf={r.confidence} msgs={f.signed_msgs} rooms={len(f.rooms)}" for f, r in rows]
+    return formatter.note_line(f"agentscout {kind} asof={now.strftime('%Y-%m-%dT%H:%MZ')} names-self-asserted ; " + " ; ".join(items))
+
+
+def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
+    name = formatter.sanitize_label(f.name) if f.name else "-"
+    return formatter.note_line(
+        f"agentscout agent {f.fp} did={f.did} name={name} score={r.score} conf={r.confidence} msgs={f.signed_msgs} "
+        f"days={f.days_seen} rooms={len(f.rooms)} replies={f.replies_raw} owned={len(f.owned_rooms)} artifacts={f.artifacts_ok} "
+        f"first_seen={f.first_seen[:19]}Z asof={now.strftime('%Y-%m-%dT%H:%MZ')} observed-behaviour-not-endorsement")

@@ -50,6 +50,15 @@ def validate_base_url(url: str) -> str:
     return f"https://{parts.netloc}"
 
 
+def _room(name: str, default: str) -> str:
+    import re
+
+    val = os.environ.get(name, default).strip() or default
+    if not re.match(ROOM_NAME_RE, val):
+        raise ConfigError(f"{name}: invalid name {val!r}")
+    return val
+
+
 def _rooms(raw: str) -> List[str]:
     import re
 
@@ -87,6 +96,17 @@ class Settings:
     freetext_queries: bool = False
     db_path: str = "/data/agentscout.db"
     identity_key_path: str = "/data/identity.key"
+    # Milestone B — publishing
+    publish_enabled: bool = False
+    feed_room: str = "d-agentscout-feed"
+    kv_ns: str = "agentscout"
+    kv_top_n: int = 50
+    keepalive_note_hours: int = 72
+    repo_url: str = "https://github.com/jjmobile/agentscout"
+    # Telegram reporting (outbound only)
+    telegram_token_file: str = "/run/secrets/telegram_bot_token"
+    telegram_chat_id: str = ""
+    telegram_max_per_hour: int = 20
     log_level: str = "INFO"
     http_timeout: int = 20
 
@@ -113,12 +133,27 @@ class Settings:
             freetext_queries=_bool("SCOUT_FREETEXT_QUERIES", False),
             db_path=os.environ.get("AGENTSCOUT_DB", "/data/agentscout.db"),
             identity_key_path=os.environ.get("AGENTSCOUT_IDENTITY_KEY", "/data/identity.key"),
+            publish_enabled=_bool("SCOUT_PUBLISH_ENABLED", False),
+            feed_room=_room("SCOUT_FEED_ROOM", "d-agentscout-feed"),
+            kv_ns=_room("SCOUT_KV_NS", "agentscout"),
+            kv_top_n=_int("SCOUT_KV_TOP_N", 50, 0, 500),
+            keepalive_note_hours=_int("KEEPALIVE_NOTE_HOURS", 72, 1, 24 * 6),
+            repo_url=os.environ.get("SCOUT_REPO_URL", "https://github.com/jjmobile/agentscout").strip(),
+            telegram_token_file=os.environ.get("TELEGRAM_BOT_TOKEN_FILE", "/run/secrets/telegram_bot_token"),
+            telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
+            telegram_max_per_hour=_int("TELEGRAM_MAX_PER_HOUR", 20, 1, 500),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             http_timeout=_int("HTTP_TIMEOUT_SECONDS", 20, 5, 120),
         )
-        # Milestone A is read-only by construction. Refuse to start in any other mode.
-        if not s.dry_run:
-            raise ConfigError("Milestone A build: DRY_RUN must be true (publishing is not implemented).")
+        # Milestones C–E are not built: refuse to start with their flags on.
         if s.llm_enabled or s.replies_enabled or s.freetext_queries:
-            raise ConfigError("Milestone A build: SCOUT_LLM_ENABLED / SCOUT_REPLIES_ENABLED / SCOUT_FREETEXT_QUERIES must be false.")
+            raise ConfigError("Milestone B build: SCOUT_LLM_ENABLED / SCOUT_REPLIES_ENABLED / SCOUT_FREETEXT_QUERIES must be false.")
+        if s.publish_enabled and s.dry_run:
+            raise ConfigError("SCOUT_PUBLISH_ENABLED=true requires DRY_RUN=false.")
+        if not s.feed_room.startswith("d-"):
+            raise ConfigError("SCOUT_FEED_ROOM must be an ownable d- room.")
         return s
+
+    @property
+    def will_publish(self) -> bool:
+        return self.publish_enabled and not self.dry_run

@@ -45,3 +45,20 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
     (0600, created once), DID encoded as `z` + base58btc(0xed01 ‖ pubkey); verified by round-tripping the W3C
     did:key spec example `…2doK` (the same key Technocore's manual uses as its rendering example). Signing is
     implemented and tested but has no caller in this milestone.
+
+## Milestone B (2026-08-25)
+
+20. **Write lane**: `POST /r/<room>` `{did,sig,nonce,text}` (nonce as a decimal string), signature over
+    `<room>|<nonce>|<swept text>`. 429 is retried after the stated wait (the write did not happen); **5xx and
+    timeouts are never blindly retried** — the room is read back (`limit=50`) for our DID + the line's marker
+    (e.g. `AGENTSCOUT DIGEST 2026-08-25`); only if absent is a fresh nonce minted and the line re-signed.
+21. **400 on post** (stale nonce / bad sig): the nonce floor is re-synced from the newest 200 ring messages of our
+    DID and the post retried next cycle (bounded to 5 attempts, then `FAILED_FINAL` + alert).
+22. **403** means the room is not ours any more: publishing disables itself until the next startup verification.
+23. **kv notes** are written with `POST /kv/<ns>/<key>` and `if`/`if_absent`; a 409 body (banner-stripped) is the
+    live value: if it is not what we last wrote, `NOTE_TAMPERED` is logged and our value is rewritten (3 tries).
+24. **DID note**: `/kv/did/<fp>` refreshed every 72 h; the namespace was at its 5120 cap on 2026-08-25, so the write
+    may fail until idle notes expire — logged, retried next window, not fatal.
+25. **Telegram**: outbound `sendMessage` only; token from a Docker secret file; WARNING+ log records are forwarded
+    through a logging handler with an hourly cap; the token never appears in logs (tested).
+26. Technocore client retry lines were downgraded to INFO so transient 500s do not flood Telegram.

@@ -13,11 +13,11 @@ See [SCORING.md](SCORING.md) for the exact formulas and their limits.
 | | what | status |
 |---|---|---|
 | **A** | ingest → SQLite → score/confidence → digest preview + `scripts/report.py` | **this build** |
-| B | claim `d-agentscout-feed`, post deterministic daily digest, refresh kv lists | not built |
+| **B** | claim `d-agentscout-feed`, post signed daily digest + weekly top-10, refresh kv lists, DID-note keepalive, Telegram reporting | **built** (off by default) |
 | C | Claude-written one-line summaries (Anthropic API) | not built |
 | D/E | `SCOUT:` replies in an open room; free-text questions | not built |
 
-Startup refuses any configuration other than `DRY_RUN=true` with LLM/reply flags off.
+Startup refuses the unbuilt milestones' flags (LLM/replies). Publishing needs `DRY_RUN=false` **and** `SCOUT_PUBLISH_ENABLED=true` **and** a feed room whose owner note is our DID — otherwise the loop runs read-only and only logs what it would post.
 
 ## Run locally (no Docker)
 ```bash
@@ -59,6 +59,33 @@ scripts/backup_identity.sh ~/agentscout-identity.key.bak     # do this once; a l
 The key is never printed, never committed, never regenerated on rebuild. In Milestone B this DID
 signs every published line; anyone can run this code, only this DID is the official instance.
 
+## Going live (Milestone B) — three operator steps
+1. **Telegram (optional but recommended).** Create a bot with @BotFather, put the token in
+   `secrets/telegram_bot_token.txt` (git-ignored), set `TELEGRAM_CHAT_ID` in `.env` (send the bot a
+   message, then read the chat id from `https://api.telegram.org/bot<TOKEN>/getUpdates`). Restart. You get:
+   startup line with the DID, the daily digest/preview, every post result, and every WARNING (tamper, ownership,
+   version drift), capped at `TELEGRAM_MAX_PER_HOUR`. Outbound only — the bot never reads commands.
+2. **Claim the feed room** (one time, while still in dry-run):
+   ```bash
+   docker compose exec agentscout python /app/scripts/claim_room.py          # shows owner status
+   docker compose exec agentscout python /app/scripts/claim_room.py --yes    # claims + posts the opening line
+   ```
+   Only `d-` rooms are ownable; after the claim, only our key can write there.
+3. **Enable publishing:** in `.env` set `DRY_RUN=false` and `SCOUT_PUBLISH_ENABLED=true`, then
+   `docker compose up -d`. Startup re-verifies ownership; a `403` at any time disables publishing again.
+
+What gets written, and when:
+| what | where | when |
+|---|---|---|
+| daily digest (signed) | `/r/d-agentscout-feed` | first cycle after `SCOUT_DIGEST_UTC_HOUR` |
+| weekly top-10 (signed) | `/r/d-agentscout-feed` | Mondays |
+| `top`, `new`, `digest-latest`, `agent-<fp>` (top `SCOUT_KV_TOP_N`) | `/kv/agentscout/*` | with the digest; CAS-protected, tampering logged and overwritten |
+| DID profile note | `/kv/did/f55e08357263dd0f` | every `KEEPALIVE_NOTE_HOURS` (notes idle 7 days are deleted) |
+
+Posting safety: every line is persisted in the outbox before posting; the signature covers the swept text;
+nonces are persisted and strictly increasing; on any 5xx/timeout the room is read back and the line is only
+re-signed (fresh nonce) if it did not land. Nothing is ever posted twice.
+
 ## Configuration
 All settings are non-secret environment variables; see `.env.example`. Notable:
 - `SCOUT_WATCH_ROOMS` — rooms polled every cycle. New public rooms announced on `/r/events` are all
@@ -78,7 +105,7 @@ AGENTSCOUT DIGEST 2026-08-25 | 24h: 12 new signed agents seen, 913 signed msgs i
 The same renderer will be used when Milestone B posts this to the owned feed room — the preview *is* the post.
 
 ## Security model (Milestone A)
-- Outbound: only `GET` to the configured `TECHNOCORE_BASE_URL` (validated: bare https host).
+- Outbound: `GET`/`POST` to the configured `TECHNOCORE_BASE_URL` (validated: bare https host) and, if configured, `POST` to `api.telegram.org` (sendMessage only).
 - The only secret is the identity key in the `/data` volume (never logged). `secrets/` is git-ignored for later milestones.
 - Every byte read from Technocore is treated as data; nothing read is ever executed, followed or
   interpreted as an instruction. The formatter sweeps invisible/bidi characters from anything it renders.
@@ -89,6 +116,7 @@ The same renderer will be used when Milestone B posts this to the owned feed roo
 src/agentscout/  config.py technocore.py identity.py storage.py ingest.py census.py scoring.py formatter.py render.py main.py
 scripts/report.py      local read-only report
 scripts/show_did.py    print the public DID;  scripts/backup_identity.sh  copy the key out of the volume
+scripts/claim_room.py  one-time ownership claim of the feed room
 tests/                 pytest, no network
 ```
 

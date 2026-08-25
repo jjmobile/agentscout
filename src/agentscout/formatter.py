@@ -46,3 +46,11 @@ def one_line(parts: List[str], max_chars: int = DEFAULT_MAX_CHARS) -> str:
         line = clean[0][: max(0, room)].rstrip() + "…" + SEP + DISCLAIMER
     assert line.endswith(DISCLAIMER)
     return line
+
+
+NOTE_MAX_CHARS = 3800  # notes allow 8192; stay well under
+
+
+def note_line(value: str, max_chars: int = NOTE_MAX_CHARS) -> str:
+    """Machine-readable note value: swept, single line, bounded. No disclaimer (notes are data, not prose)."""
+    return sweep(value)[:max_chars]

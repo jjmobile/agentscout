@@ -55,6 +55,20 @@ MIGRATIONS: List[str] = [
         components TEXT NOT NULL, PRIMARY KEY(day, did)
     );
     """,
+    # v2 — Milestone B: signed publishing
+    """
+    ALTER TABLE room_state ADD COLUMN last_sent_nonce INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE outbox (
+        id INTEGER PRIMARY KEY, room TEXT NOT NULL, kind TEXT NOT NULL, marker TEXT NOT NULL,
+        text TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        nonce INTEGER, posted_seq INTEGER, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        UNIQUE(room, marker)
+    );
+    CREATE TABLE published_notes (
+        ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, written_at TEXT NOT NULL,
+        tamper_events INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(ns, key)
+    );
+    """,
 ]
 
 
@@ -136,6 +150,58 @@ class Storage:
             "UPDATE room_state SET last_seen_seq=?, updated_at=?, first_polled_at=COALESCE(first_polled_at,?) WHERE room=?",
             (last_seen_seq, now, now, room),
         )
+
+    def next_nonce(self, room: str, now_ms: int) -> int:
+        """Strictly increasing per room, transaction-safe: max(now_ms, last+1), persisted before use."""
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.conn.execute("SELECT last_sent_nonce FROM room_state WHERE room=?", (room,)).fetchone()
+            last = row["last_sent_nonce"] if row else 0
+            nonce = max(int(now_ms), last + 1)
+            if row:
+                self.conn.execute("UPDATE room_state SET last_sent_nonce=? WHERE room=?", (nonce, room))
+            else:
+                self.conn.execute("INSERT INTO room_state(room,last_seen_seq,source,last_sent_nonce) VALUES(?,0,'feed',?)", (room, nonce))
+            self.conn.execute("COMMIT")
+        except Exception:
+            self.conn.execute("ROLLBACK")
+            raise
+        return nonce
+
+    def bump_nonce_floor(self, room: str, floor: int) -> None:
+        self.conn.execute("UPDATE room_state SET last_sent_nonce=MAX(last_sent_nonce, ?) WHERE room=?", (floor, room))
+
+    # ---- outbox ----
+    def enqueue(self, room: str, kind: str, marker: str, text: str, now: str) -> Optional[int]:
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO outbox(room,kind,marker,text,state,created_at,updated_at) VALUES(?,?,?,?,'PENDING',?,?)",
+            (room, kind, marker, text, now, now))
+        return cur.lastrowid if cur.rowcount == 1 else None
+
+    def outbox_pending(self, limit: int = 5) -> List[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM outbox WHERE state IN ('PENDING','FAILED_RETRYABLE') ORDER BY id LIMIT ?", (limit,)).fetchall()
+
+    def outbox_update(self, row_id: int, state: str, now: str, nonce: Optional[int] = None, posted_seq: Optional[int] = None,
+                      error: Optional[str] = None, bump_attempts: bool = False) -> None:
+        self.conn.execute(
+            "UPDATE outbox SET state=?, updated_at=?, nonce=COALESCE(?,nonce), posted_seq=COALESCE(?,posted_seq), error=?,"
+            " attempts=attempts+? WHERE id=?",
+            (state, now, nonce, posted_seq, error, 1 if bump_attempts else 0, row_id))
+
+    def outbox_has(self, room: str, marker: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM outbox WHERE room=? AND marker=?", (room, marker)).fetchone()
+
+    # ---- published notes ----
+    def published_note(self, ns: str, key: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM published_notes WHERE ns=? AND key=?", (ns, key)).fetchone()
+
+    def set_published_note(self, ns: str, key: str, value: str, now: str, tampered: bool = False) -> None:
+        self.conn.execute(
+            """INSERT INTO published_notes(ns,key,value,written_at,tamper_events) VALUES(?,?,?,?,?)
+               ON CONFLICT(ns,key) DO UPDATE SET value=excluded.value, written_at=excluded.written_at,
+                 tamper_events=published_notes.tamper_events+excluded.tamper_events""",
+            (ns, key, value, now, 1 if tampered else 0))
 
     def record_gap(self, room: str, expected: int, first_available: int, now: str) -> None:
         self.conn.execute(
@@ -295,7 +361,7 @@ class Storage:
 
     def counts(self) -> Dict[str, int]:
         out = {}
-        for table in ("messages", "agents", "did_notes", "room_owners", "artifact_refs", "rooms_seen", "sequence_gaps", "room_state"):
+        for table in ("messages", "agents", "did_notes", "room_owners", "artifact_refs", "rooms_seen", "sequence_gaps", "room_state", "outbox", "published_notes"):
             out[table] = self.conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
         return out
 
