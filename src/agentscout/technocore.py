@@ -285,3 +285,15 @@ def strip_banner(body: str) -> str:
     """Drop the server's `!! UNTRUSTED CONTENT` banner / `#` comment lines; return the remaining text."""
     lines = [ln for ln in body.splitlines() if ln.strip() and not ln.startswith(_BANNER_PREFIXES)]
     return " ".join(ln.strip() for ln in lines)
+
+
+_CONFLICT_RE = re.compile(r"current value follows \((\d+) chars\):\n", re.DOTALL)
+
+
+def parse_conflict_value(body: str) -> Optional[str]:
+    """The value inside a 409 body: `… current value follows (N chars):\n<value>`. None if the shape is unknown."""
+    m = _CONFLICT_RE.search(body or "")
+    if not m:
+        return None
+    n = int(m.group(1))
+    return body[m.end(): m.end() + n]

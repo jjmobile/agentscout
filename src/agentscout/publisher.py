@@ -15,7 +15,7 @@ from . import formatter, render
 from .config import Settings
 from .identity import Identity
 from .storage import Storage
-from .technocore import TechnocoreClient, TechnocoreError, strip_banner
+from .technocore import TechnocoreClient, TechnocoreError, parse_conflict_value
 
 log = logging.getLogger("agentscout.publisher")
 
@@ -240,10 +240,17 @@ class Publisher:
                 self.db.set_published_note(ns, key, value, iso(now), tampered=tampered)
                 return True
             if status == 409:
-                current = strip_banner(body)
-                if prev is None or current != prev["value"]:
+                current = parse_conflict_value(body)
+                if current is None:
+                    log.warning("write /kv/%s/%s: 409 with unparseable body: %s", ns, key, body.strip()[:120])
+                    return False
+                if current == value:              # our earlier (timed-out) write landed after all
+                    self.db.set_published_note(ns, key, value, iso(now))
+                    return True
+                if prev is not None and current != prev["value"]:
+                    if not tampered:
+                        log.warning("NOTE_TAMPERED /kv/%s/%s: someone overwrote our note; rewriting", ns, key)
                     tampered = True
-                    log.warning("NOTE_TAMPERED /kv/%s/%s (attempt %d); rewriting", ns, key, attempt + 1)
                 if_value, if_absent = current, False
                 continue
             log.warning("write /kv/%s/%s: HTTP %d %s", ns, key, status, body.strip()[:120])

@@ -114,11 +114,26 @@ def test_note_cas_detects_tamper_and_wins(server, client, storage, tmp_path):
     client._fetch = cap
     assert pub.write_note_cas("agentscout", "top", "v1", NOW)
     assert cap.bodies[0] == {"value": "v1", "if_absent": True}
-    cap.responses = [(409, {}, "!! UNTRUSTED\n\nEVIL\n"), (200, {}, "ok")]
+    conflict = "409 note agentscout/top changed since you read it\n\nto retry: merge ...\ncurrent value follows (4 chars):\nEVIL\n"
+    cap.responses = [(409, {}, conflict), (200, {}, "ok")]
     assert pub.write_note_cas("agentscout", "top", "v2", NOW)
     assert cap.bodies[1] == {"value": "v2", "if": "v1"}
     assert cap.bodies[2] == {"value": "v2", "if": "EVIL"}
     assert storage.published_note("agentscout", "top")["tamper_events"] == 1
+
+
+def test_409_with_our_own_value_means_the_timed_out_write_landed(server, client, storage, tmp_path, caplog):
+    import logging
+    from agentscout.technocore import parse_conflict_value
+    assert parse_conflict_value("409 note x already exists\n\nblah\ncurrent value follows (9 chars):\nalpha one\n") == "alpha one"
+    assert parse_conflict_value("weird") is None
+    s, ident, pub = make(server, client, storage, tmp_path)
+    cap = PostCapture(server, [(409, {}, "409 note agentscout/top already exists\n\nto retry: ...\ncurrent value follows (5 chars):\nv-new\n")])
+    client._fetch = cap
+    with caplog.at_level(logging.WARNING):
+        assert pub.write_note_cas("agentscout", "top", "v-new", NOW) is True
+    assert "NOTE_TAMPERED" not in caplog.text and len(cap.bodies) == 1
+    assert storage.published_note("agentscout", "top")["tamper_events"] == 0
 
 
 def test_verify_ownership(server, client, storage, tmp_path):
