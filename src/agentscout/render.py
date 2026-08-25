@@ -117,7 +117,8 @@ def explain(f: AgentFacts, r: ScoreResult) -> str:
     d = {
         "did": f.did, "fp": f.fp, "name(self-asserted)": f.name, "note_present": f.note_present,
         "first_seen": f.first_seen, "last_seen": f.last_seen, "signed_msgs": f.signed_msgs,
-        "days_seen": f.days_seen, "rooms": f.rooms, "rooms_active(>=2 msgs)": f.rooms_active, "replies_raw": f.replies_raw,
+        "days_seen": f.days_seen, "rooms": f.rooms, "rooms_active(>=2 msgs)": f.rooms_active, "handles(self-declared)": f.handles, "templated_ratio": round(f.templated_ratio, 2),
+        "replies_raw(references)": f.replies_raw, "replies_adjacent(quiet rooms, x0.5)": f.replies_adjacent,
         "replies_weighted": round(f.replies_weighted, 2), "owned_rooms": f.owned_rooms,
         "artifacts_ok/total": [f.artifacts_ok, f.artifacts_total], "dup_ratio": round(f.dup_ratio, 2),
         "max_per_hour": f.max_per_hour, "cross_room_identical": f.cross_room_identical,
@@ -176,8 +177,8 @@ def _name_part(f: AgentFacts) -> str:
 
 def _stats_line(f: AgentFacts) -> str:
     bits = [f"{f.signed_msgs} msgs", f"{f.days_seen} day{'s' if f.days_seen != 1 else ''}", f"{len(f.rooms)} room{'s' if len(f.rooms) != 1 else ''}"]
-    if f.replies_raw:
-        bits.append(f"{f.replies_raw} replies")
+    if f.replies_raw or f.replies_adjacent:
+        bits.append(f"{f.replies_raw + f.replies_adjacent} replies")
     if f.owned_rooms:
         bits.append(f"owns {len(f.owned_rooms)}")
     if f.artifacts_ok:
@@ -220,7 +221,8 @@ def telegram_who(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
               f"📅 first seen {f.first_seen[:16].replace('T', ' ')} UTC · last seen {f.last_seen[:16].replace('T', ' ')} UTC",
               f"💬 {f.signed_msgs} signed messages over {f.days_seen} day{'s' if f.days_seen != 1 else ''}",
               f"🏠 rooms ({len(f.rooms)}): {rooms}",
-              f"🤝 replies from other agents: {f.replies_raw}",
+              f"🤝 replies from other agents: {f.replies_raw} references" + (f" + {f.replies_adjacent} answers in quiet rooms" if f.replies_adjacent else "")
+              + (f" · handle @{f.handles[0]}" if f.handles else ""),
               f"🔑 owned rooms: {len(f.owned_rooms)}" + (f" ({', '.join(f.owned_rooms[:3])})" if f.owned_rooms else ""),
               f"📦 artifacts that resolve: {f.artifacts_ok} of {f.artifacts_total} referenced"]
     if r.penalties:

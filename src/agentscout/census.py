@@ -14,10 +14,24 @@ DID_PREFIX = "did:key:z6Mk"
 DID_RE = re.compile(r"did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,50}")
 KV_REF_RE = re.compile(r"/kv/([a-z0-9][a-z0-9_-]{0,47})/([a-z0-9][a-z0-9_-]{0,47})(?![a-z0-9_/-])")
 NOTE_FIELD_RE = re.compile(r"(?:^|\s)(name|role|mailbox|purpose|room|feed|repo|source)\s*:\s*([^\s|;]+)", re.IGNORECASE)
-REPLY_WINDOW = timedelta(minutes=30)
+REPLY_WINDOW = timedelta(minutes=30)          # mention-based replies: within this after the target's message
+ADJACENCY_WINDOW = timedelta(minutes=10)      # quiet-room adjacency: another DID answering shortly after
+QUIET_ROOM_MSGS_PER_HOUR = 20.0               # rooms busier than this get no adjacency credit (lobby ≈ 3000/h)
+ADJACENCY_WEIGHT = 0.5
+MAX_REPLIES_PER_REPLIER_PER_TARGET_PER_DAY = 3
+MAX_REPLIES_PER_REPLIER_PER_DAY = 20          # endorsement-spraying fleets stop counting after this
+RECIPROCAL_DISCOUNT = 0.25                    # A names B and B names A the same day: mutual back-scratching
+TEMPLATED_RATIO_BROADCAST = 0.7               # > this share of "[Role @handle] …" messages = automated broadcaster
+SELF_TAG_RE = re.compile(r"^\s*\[[^\]]{0,60}?@([A-Za-z0-9_]{3,32})\]")   # "[Role @handle] …" — the agent's own tag
+_TOKEN_DID_RE = re.compile(r"did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,50}")
+_TOKEN_Z_RE = re.compile(r"(?<![A-Za-z0-9])z6Mk[1-9A-HJ-NP-Za-km-z]{4,}")
+_TOKEN_ELL_RE = re.compile(r"…([A-Za-z0-9]{4})")
+_TOKEN_FP_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])")
+_TOKEN_HANDLE_RE = re.compile(r"@([A-Za-z0-9_]{3,32})")
 
 CONTRACT_RES = [
     re.compile(r"\b0x[0-9a-fA-F]{40}\b"),
+    re.compile(r"\b0x[0-9a-fA-F]{4,6}\.{2,3}[0-9a-fA-F]{4,6}\b"),   # abbreviated "0x585c...fa64" in alert bots
     re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}pump\b"),
     re.compile(r"\bairdrop\b", re.IGNORECASE),
     re.compile(r"\bCA\s*:\s*\S{20,}", re.IGNORECASE),
@@ -95,8 +109,11 @@ class AgentFacts:
     dup_ratio: float = 0.0
     max_per_hour: int = 0
     cross_room_identical: int = 0
-    replies_raw: int = 0
+    replies_raw: int = 0             # mention/fingerprint/handle references by other DIDs
+    replies_adjacent: int = 0        # answers within 10 min in quiet rooms (counted at 0.5)
     replies_weighted: float = 0.0
+    handles: List[str] = field(default_factory=list)   # self-declared "@handle" tags seen in its own messages
+    templated_ratio: float = 0.0     # share of its messages that are "[Role @handle] …" broadcasts
     owned_rooms: List[str] = field(default_factory=list)
     artifacts_ok: int = 0
     artifacts_total: int = 0
@@ -112,13 +129,39 @@ class AgentFacts:
     sample: str = ""  # a short, swept excerpt of the most recent message (for humans only)
 
 
-def aliases_for(did: str, name: Optional[str]) -> List[str]:
+def aliases_for(did: str, name: Optional[str], handles: Optional[List[str]] = None, fp: Optional[str] = None) -> List[str]:
+    """Strings another agent would use to refer to this one. All matched casefolded."""
     z = did[len("did:key:"):]
     out = [did.casefold(), z[:8].casefold(), ("…" + z[-4:]).casefold()]
+    if fp:
+        out.append(fp.casefold())                       # "/kv/did/<fp>" references
     if name and len(name) >= 4:
         out.append("@" + name.casefold())
         out.append(name.casefold())
+    for h in handles or []:
+        out.append("@" + h.casefold())
     return out
+
+
+def self_handles(msgs: list) -> List[str]:
+    """Handles an agent declares about itself: the "@x" inside a leading "[… @x]" tag, seen in ≥2 of its messages."""
+    counts: Dict[str, int] = defaultdict(int)
+    for m in msgs:
+        mt = SELF_TAG_RE.match(m["text"])
+        if mt:
+            counts[mt.group(1)] += 1
+    return sorted(h for h, n in counts.items() if n >= 2 or n == len(msgs))
+
+
+def room_rates(by_room: Dict[str, list]) -> Dict[str, float]:
+    """Messages per hour per room over the span we hold (≥2 messages)."""
+    rates: Dict[str, float] = {}
+    for room, ms in by_room.items():
+        if len(ms) < 2:
+            continue
+        span_h = max(0.05, (parse_ts(ms[-1]["ts"]) - parse_ts(ms[0]["ts"])).total_seconds() / 3600.0)
+        rates[room] = len(ms) / span_h
+    return rates
 
 
 def _messages_by_did(messages) -> Dict[str, list]:
@@ -181,6 +224,9 @@ def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]
             f.opaque_ratio = sum(1 for m in msgs if is_opaque(m["text"])) / len(msgs)
             latest = max(msgs, key=lambda m: m["ts"])
             f.sample = " ".join(latest["text"].split())[:140]
+        f.handles = self_handles(msgs)
+        if msgs:
+            f.templated_ratio = sum(1 for m in msgs if SELF_TAG_RE.match(m["text"])) / len(msgs)
         f.owned_rooms = owners.get(did, [])
         f.artifacts_ok, f.artifacts_total = artifacts.get(did, (0, 0))
         sm = summaries.get(did)
@@ -193,44 +239,126 @@ def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]
         f.days_since_first_seen = max(0.0, (now - parse_ts(row["first_seen"])).total_seconds() / 86400.0)
         facts[did] = f
 
-    # replies: another signed DID, same room, within 30 min after, mentioning an alias
-    for did, f in facts.items():
-        if not f.signed_msgs:
+    # ---- replies from other DIDs --------------------------------------------------------------------
+    # (a) reference (1.0): another signed DID, same room, ≤30 min after one of the agent's messages, whose text names
+    #     the agent (DID, z6Mk prefix, "…xxxx", fingerprint, DID-note name, self-declared @handle).
+    # (b) adjacency (0.5): in a quiet room (≤20 msgs/h) a different signed DID posts ≤10 min after the agent —
+    #     neither message a "[Role @handle]" broadcast, replier not a broadcaster; once per replier per target per day.
+    # Discounts: reciprocal naming the same day ×0.25; young/weak replier (sock-puppet) ×0.25.
+    # Caps: ≤3 per replier per target per day, ≤20 per replier per day overall.
+    index = _reference_index(facts, notes)
+    rates = room_rates(by_room)
+    named_pairs = set()                       # (replier, target, day) for reciprocity
+    credits: List[Tuple[str, str, str, float, bool]] = []   # (target, replier, day, weight, is_reference)
+    for room, ms in by_room.items():
+        quiet = rates.get(room, 0.0) <= QUIET_ROOM_MSGS_PER_HOUR
+        recent: list = []                      # signed messages in this room, oldest first (pruned to 30 min)
+        for m in ms:
+            if not m["signed"]:
+                continue
+            t = parse_ts(m["ts"])
+            recent = [r for r in recent if t - r[0] <= REPLY_WINDOW]
+            sender = m["sender_did"]
+            day = m["ts"][:10]
+            refs = _referenced_dids(m["text"], index) - {sender}
+            for target in refs:
+                named_pairs.add((sender, target, day))
+                if any(r[1] == target for r in recent):
+                    credits.append((target, sender, day, 1.0, True))
+            templated = bool(SELF_TAG_RE.match(m["text"]))
+            if quiet and not templated and facts.get(sender) is not None and facts[sender].templated_ratio <= 0.5:
+                seen_targets = set()
+                for (rt, rdid, rtempl) in recent:
+                    if rdid == sender or rdid in refs or rdid in seen_targets or rtempl:
+                        continue
+                    if t - rt <= ADJACENCY_WINDOW:
+                        seen_targets.add(rdid)
+                        credits.append((rdid, sender, day, ADJACENCY_WEIGHT, False))
+            recent.append((t, sender, templated))
+    per_pair_day: Dict[Tuple[str, str, str], int] = defaultdict(int)
+    adjacency_pair_day = set()
+    replier_day_total: Dict[Tuple[str, str], int] = defaultdict(int)
+    for target, replier, day, weight, is_ref in credits:
+        f = facts.get(target)
+        if f is None:
             continue
-        al = aliases_for(did, f.name)
-        counted_per_replier_day: Dict[Tuple[str, str], int] = defaultdict(int)
-        seen_reply_ids = set()
-        for m in by_did[did]:
-            t0 = parse_ts(m["ts"])
-            for other in by_room[m["room"]]:
-                if other["seq"] <= m["seq"]:
-                    continue
-                if not other["signed"] or other["sender_did"] == did:
-                    continue
-                if parse_ts(other["ts"]) - t0 > REPLY_WINDOW:
-                    break
-                key = (other["room"], other["seq"])
-                if key in seen_reply_ids:
-                    continue
-                low = other["text"].casefold()
-                if not any(a in low for a in al):
-                    continue
-                replier = other["sender_did"]
-                day_key = (replier, other["ts"][:10])
-                if counted_per_replier_day[day_key] >= 5:
-                    continue
-                counted_per_replier_day[day_key] += 1
-                seen_reply_ids.add(key)
-                f.replies_raw += 1
-                weight = 1.0
-                if prelim_scores is not None:
-                    rf = facts.get(replier)
-                    young = rf is not None and rf.days_since_first_seen < 2.0
-                    weak = prelim_scores.get(replier, 0) < 20
-                    if young or weak:
-                        weight = 0.25
-                f.replies_weighted += weight
+        if not is_ref:
+            if (target, replier, day) in adjacency_pair_day:
+                continue
+            adjacency_pair_day.add((target, replier, day))
+        if per_pair_day[(replier, target, day)] >= MAX_REPLIES_PER_REPLIER_PER_TARGET_PER_DAY:
+            continue
+        if replier_day_total[(replier, day)] >= MAX_REPLIES_PER_REPLIER_PER_DAY:
+            continue
+        per_pair_day[(replier, target, day)] += 1
+        replier_day_total[(replier, day)] += 1
+        if is_ref:
+            f.replies_raw += 1
+        else:
+            f.replies_adjacent += 1
+        if (target, replier, day) in named_pairs:
+            weight *= RECIPROCAL_DISCOUNT
+        if prelim_scores is not None:
+            rf = facts.get(replier)
+            young = rf is not None and rf.days_since_first_seen < 2.0
+            weak = prelim_scores.get(replier, 0) < 20
+            if young or weak:
+                weight *= 0.25
+        f.replies_weighted += weight
     return facts
+
+
+def _reference_index(facts: Dict[str, "AgentFacts"], notes: Dict[str, object]) -> Dict[str, Dict[str, str]]:
+    """Lookup tables from the ways agents are referred to → DID. Ambiguous keys (shared by >1 DID) are dropped."""
+    tables: Dict[str, Dict[str, str]] = {"did": {}, "z8": {}, "last4": {}, "fp": {}, "handle": {}}
+    clash: Dict[str, set] = defaultdict(set)
+
+    def put(table: str, key: str, did: str) -> None:
+        key = key.casefold()
+        if key in tables[table] and tables[table][key] != did:
+            clash[table].add(key)
+        tables[table][key] = did
+
+    for did, f in facts.items():
+        z = did[len("did:key:"):]
+        put("did", did, did)
+        put("z8", z[:8], did)
+        put("last4", z[-4:], did)
+        put("fp", f.fp, did)
+        for h in f.handles:
+            put("handle", h, did)
+        if f.name and len(f.name) >= 4:
+            put("handle", f.name, did)
+    for table, keys in clash.items():
+        for k in keys:
+            tables[table].pop(k, None)
+    return tables
+
+
+def _referenced_dids(text: str, index: Dict[str, Dict[str, str]]) -> set:
+    out = set()
+    low = text.casefold()
+    for m in _TOKEN_DID_RE.findall(text):
+        d = index["did"].get(m.casefold())
+        if d:
+            out.add(d)
+    for m in _TOKEN_Z_RE.findall(text):
+        d = index["z8"].get(m[:8].casefold())
+        if d:
+            out.add(d)
+    for m in _TOKEN_ELL_RE.findall(text):
+        d = index["last4"].get(m.casefold())
+        if d:
+            out.add(d)
+    for m in _TOKEN_FP_RE.findall(low):
+        d = index["fp"].get(m)
+        if d:
+            out.add(d)
+    for m in _TOKEN_HANDLE_RE.findall(text):
+        d = index["handle"].get(m.casefold())
+        if d:
+            out.add(d)
+    return out
 
 
 def extract_kv_refs(text: str) -> List[Tuple[str, str]]:

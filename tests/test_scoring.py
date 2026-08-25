@@ -124,3 +124,47 @@ def test_flop_teaser_line_in_digest(storage):
     line = render.digest_line(render.score_all(storage, NOW), storage, NOW)
     assert "💸 FLOP paid/received: ??? — nobody can yet. Mentioned 2× by 2 agents today." in line
     assert line.endswith("Observed behaviour, not endorsement.")
+
+
+def _put(storage, room, seq, minutes, did, text, signed=True):
+    storage.insert_messages(room, [(seq, T(minutes), did if signed else "~n", did if signed else None, signed, text, f"h{room}{seq}")], T(0))
+
+
+def test_reply_by_self_declared_handle_and_fingerprint(storage):
+    from agentscout.census import fingerprint
+    _put(storage, "builders", 1, -300, DID_A, "[Mint Verifier @mint_tracker_d390] Validated stages")
+    _put(storage, "builders", 2, -200, DID_A, "[Mint Verifier @mint_tracker_d390] Validated again")
+    _put(storage, "builders", 3, -190, DID_B, "[Web-of-Trust @observer_10] Endorsed peer @mint_tracker_d390 for accuracy")
+    _put(storage, "builders", 4, -180, DID_C, "see the note at /kv/did/" + fingerprint(DID_A) + " for details")
+    _put(storage, "builders", 5, -170, DID_B, "unrelated chatter about nothing")
+    f = compute_facts(storage, NOW)[DID_A]
+    assert f.handles == ["mint_tracker_d390"]
+    assert f.replies_raw == 2 and f.replies_adjacent == 0
+
+
+def test_adjacency_counts_only_in_quiet_rooms(storage):
+    # quiet room: 3 messages over an hour
+    _put(storage, "small-room", 1, -60, DID_A, "does anyone know how nonces work here?")
+    _put(storage, "small-room", 2, -55, DID_B, "yes, they must increase per key per room")
+    _put(storage, "small-room", 3, -50, DID_B, "and a millisecond clock works fine")   # same replier, same hour: counted once
+    # busy room: 300 messages in 5 minutes, one of them right after A
+    _put(storage, "busy", 1, -30, DID_A, "hello busy room")
+    for i in range(2, 302):
+        _put(storage, "busy", i, -30 + i * 0.01, DID_C if i % 2 else DID_B, f"noise {i}")
+    f = compute_facts(storage, NOW)[DID_A]
+    assert f.replies_adjacent == 1 and f.replies_raw == 0
+    assert f.replies_weighted == 0.5
+
+
+def test_fleet_caps_limit_endorsement_spray(storage):
+    _put(storage, "r", 1, -100, DID_A, "[Sentinel @target_x] status ok")
+    _put(storage, "r", 2, -99, DID_A, "[Sentinel @target_x] status ok again")
+    for i in range(3, 15):
+        _put(storage, "r", i, -98 + i * 0.1, DID_B, f"[Web-of-Trust @wot_{i}] Endorsed peer @target_x #{i}")
+    f = compute_facts(storage, NOW)[DID_A]
+    assert f.replies_raw == 3          # per replier per target per day cap
+
+
+def test_abbreviated_contract_addresses_count_as_contract_spam(storage):
+    _put(storage, "builders", 1, -10, DID_A, "[LIVE MINT ACTIVE] morphora on INK (0x585c...fa64) | Stage: Public Live | Supply: 2311")
+    assert compute_facts(storage, NOW)[DID_A].contract_spam_msgs == 1

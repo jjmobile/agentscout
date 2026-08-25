@@ -27,6 +27,7 @@ class Penalties:
     contract_spam: int = 20       # any contract-address / airdrop pattern
     injection: int = 20           # role-override / rank-me phrases
     opaque: int = 20              # ≥4 msgs and >50 % ciphertext/base64/hash dumps
+    broadcast: int = 15           # ≥4 msgs and >70 % "[Role @handle] …" templated broadcasts
 
 
 DEFAULT_WEIGHTS = Weights()
@@ -70,6 +71,8 @@ def score(f: AgentFacts, w: Weights = DEFAULT_WEIGHTS, p: Penalties = DEFAULT_PE
         pens["injection"] = p.injection
     if f.signed_msgs >= 4 and f.opaque_ratio > 0.5:
         pens["opaque"] = p.opaque
+    if f.signed_msgs >= 4 and f.templated_ratio > 0.7:
+        pens["broadcast"] = p.broadcast
     if f.injection_msgs < 1 and "injection-attempt" in f.llm_flags:
         pens["injection"] = p.injection
     deterministic = sum(comps.values())
