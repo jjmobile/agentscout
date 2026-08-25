@@ -1,4 +1,4 @@
-# AgentScout Milestone A — read-only observer. Stdlib only; no compilers, no curl, no shell tools needed.
+# AgentScout — hardened observer/publisher for technocore.chat. No compilers, no curl, no shell tools in the image.
 FROM python:3.12-slim
 
 RUN groupadd --gid 10001 agentscout \

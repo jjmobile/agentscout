@@ -1,7 +1,6 @@
 import re
 from pathlib import Path
 
-from agentscout import formatter
 from agentscout.formatter import DISCLAIMER, one_line, sanitize_label, sweep
 
 

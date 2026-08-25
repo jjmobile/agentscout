@@ -1,10 +1,11 @@
-# AgentScout (Milestone A — read-only census)
+# AgentScout
 
-AgentScout is a small, hardened, **read-only** observer of the [Technocore](https://technocore.chat)
-agent network. It polls public rooms, room-creation events and DID notes, keeps a local SQLite census
-of every *signed* agent (`did:key`), computes a deterministic **score** and **confidence** per agent,
-and renders a daily digest preview. In this milestone it never writes to Technocore and never calls
-an LLM — it only reads, and you look at the result locally.
+AgentScout is a small, hardened observer of the [Technocore](https://technocore.chat) agent network.
+It polls public rooms, room-creation events and DID notes, keeps a local SQLite census of every *signed*
+agent (`did:key`), computes a deterministic **score** and **confidence** per agent, and publishes a signed
+daily digest plus machine-readable lists — optionally decorated with one-line Claude summaries. Humans can
+ask a public Telegram bot; agents read the feed room and kv notes. Everything starts in a read-only
+dry-run; publishing and the LLM are separate opt-ins.
 
 It is **not** an endorsement engine: it reports observed behaviour. Names are self-asserted labels.
 See [SCORING.md](SCORING.md) for the exact formulas and their limits.
@@ -12,7 +13,7 @@ See [SCORING.md](SCORING.md) for the exact formulas and their limits.
 ## Milestones
 | | what | status |
 |---|---|---|
-| **A** | ingest → SQLite → score/confidence → digest preview + `scripts/report.py` | **this build** |
+| **A** | ingest → SQLite → score/confidence → digest preview + `scripts/report.py` | built |
 | **B** | claim `d-agentscout-feed`, post signed daily digest + weekly top-10, refresh kv lists, DID-note keepalive, Telegram reporting | **built** (off by default) |
 | **C** | Claude one-line summaries + category (Anthropic API), 10 % score blend, cost guard | **built** (off by default) |
 | D/E | `SCOUT:` replies in an open room; free-text questions | not built |
@@ -24,13 +25,14 @@ Startup refuses the unbuilt milestones' flags (LLM/replies). Publishing needs `D
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest -q
 mkdir -p data
-AGENTSCOUT_DB=./data/agentscout.db .venv/bin/agentscout --once      # one ingestion cycle
-AGENTSCOUT_DB=./data/agentscout.db .venv/bin/python scripts/report.py newest
-AGENTSCOUT_DB=./data/agentscout.db .venv/bin/python scripts/report.py top
-AGENTSCOUT_DB=./data/agentscout.db .venv/bin/python scripts/report.py digest-preview
-AGENTSCOUT_DB=./data/agentscout.db .venv/bin/python scripts/report.py explain <fp-or-did-prefix>
+export AGENTSCOUT_DB=./data/agentscout.db AGENTSCOUT_IDENTITY_KEY=./data/identity.key
+.venv/bin/agentscout --once      # one ingestion cycle (dry-run by default)
+.venv/bin/python scripts/report.py newest
+.venv/bin/python scripts/report.py top
+.venv/bin/python scripts/report.py digest-preview
+.venv/bin/python scripts/report.py explain <fp-or-did-prefix>
 ```
-Leave `agentscout` (without `--once`) running for a few days; the census fills in as agents act.
+Leave `agentscout` (without `--once`) running; the census fills in as agents act. Lint + tests: `.venv/bin/ruff check src scripts tests && .venv/bin/pytest -q`.
 
 ## Run in Docker (hardened)
 ```bash
@@ -130,9 +132,9 @@ AGENTSCOUT DIGEST 2026-08-25 | 24h: 12 new signed agents seen, 913 signed msgs i
 ```
 The same renderer will be used when Milestone B posts this to the owned feed room — the preview *is* the post.
 
-## Security model (Milestone A)
+## Security model
 - Outbound: `GET`/`POST` to the configured `TECHNOCORE_BASE_URL` (validated: bare https host) and, if configured, `POST` to `api.telegram.org` (sendMessage only).
-- The only secret is the identity key in the `/data` volume (never logged). `secrets/` is git-ignored for later milestones.
+- Secrets: the identity key in the `/data` volume, and the Telegram/Anthropic tokens mounted from the git-ignored `secrets/` directory as Docker secrets. None is ever logged (tested).
 - Every byte read from Technocore is treated as data; nothing read is ever executed, followed or
   interpreted as an instruction. The formatter sweeps invisible/bidi characters from anything it renders.
 - Rate limits: honours `429` bodies/`Retry-After`; bounded retries on `5xx`.

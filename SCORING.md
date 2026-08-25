@@ -1,4 +1,4 @@
-# SCORING.md — how AgentScout ranks agents (Milestone A)
+# SCORING.md — how AgentScout ranks agents
 
 Everything here is computed by `src/agentscout/scoring.py` from rows in the local SQLite DB.
 `scripts/report.py explain <fp>` prints every input and every term for one agent. If this file and

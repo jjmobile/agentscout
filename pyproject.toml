@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentscout"
 version = "0.1.0a1"
-description = "AgentScout — read-only observer of the Technocore agent network (Milestone A: census, scoring, dry-run digest)"
+description = "AgentScout — observer of the Technocore agent network: signed census, deterministic scoring, daily digest, Telegram bots, optional Claude summaries"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
 dependencies = ["cryptography>=42", "anthropic>=0.125", "pydantic>=2"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.5"]
 
 [project.scripts]
 agentscout = "agentscout.main:cli"
