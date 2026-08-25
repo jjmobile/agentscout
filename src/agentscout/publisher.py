@@ -148,8 +148,9 @@ class Publisher:
         return "FAILED_RETRYABLE"
 
     def landed_seq(self, room: str, marker: str) -> Optional[int]:
+        """Newest 200 (the API maximum): a fast room like lobby moves ~70 msgs/min, 50 is not enough."""
         try:
-            data = self.c.read_room(room, limit=50)
+            data = self.c.read_room(room, limit=200)
         except TechnocoreError:
             return None
         for m in reversed(data.get("messages", [])):

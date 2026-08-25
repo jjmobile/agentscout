@@ -66,7 +66,7 @@ def test_5xx_then_landed_is_not_reposted(server, client, storage, tmp_path):
     marker = "AGENTSCOUT DIGEST 2026-08-25"
     cap = PostCapture(server, [(502, {}, "bad gateway")])
     client._fetch = cap
-    server.route(f"/r/{s.feed_room}?format=json&limit=50", body=room_json(s.feed_room, [msg(3, T(0), ident.did, marker + " | ...", 1)]))
+    server.route(f"/r/{s.feed_room}?format=json&limit=200", body=room_json(s.feed_room, [msg(3, T(0), ident.did, marker + " | ...", 1)]))
     storage.enqueue(s.feed_room, "digest", marker, marker + " | ...", T(0))
     row = storage.outbox_pending()[0]
     assert pub.post_signed_line(row, NOW) == "POSTED"
@@ -79,7 +79,7 @@ def test_5xx_not_landed_retries_with_fresh_nonce(server, client, storage, tmp_pa
     marker = "AGENTSCOUT DIGEST 2026-08-25"
     cap = PostCapture(server, [(503, {}, ""), (200, {}, json.dumps(room_json(s.feed_room, [], last_seq=9)))])
     client._fetch = cap
-    server.route(f"/r/{s.feed_room}?format=json&limit=50", body=room_json(s.feed_room, []))
+    server.route(f"/r/{s.feed_room}?format=json&limit=200", body=room_json(s.feed_room, []))
     storage.enqueue(s.feed_room, "digest", marker, marker, T(0))
     row = storage.outbox_pending()[0]
     assert pub.post_signed_line(row, NOW) == "FAILED_RETRYABLE"
@@ -143,7 +143,7 @@ def test_posted_seq_from_text_reply_or_readback(server, client, storage, tmp_pat
     s, ident, pub = make(server, client, storage, tmp_path)
     marker = "AGENTSCOUT DIGEST 2026-08-25"
     client._fetch = PostCapture(server, [(200, {}, "ok")])
-    server.route(f"/r/{s.feed_room}?format=json&limit=50", body=room_json(s.feed_room, [msg(4, T(0), ident.did, marker, 1)]))
+    server.route(f"/r/{s.feed_room}?format=json&limit=200", body=room_json(s.feed_room, [msg(4, T(0), ident.did, marker, 1)]))
     storage.enqueue(s.feed_room, "digest", marker, marker, T(0))
     assert pub.post_signed_line(storage.outbox_pending()[0], NOW) == "POSTED"
     assert storage.outbox_has(s.feed_room, marker)["posted_seq"] == 4
@@ -155,7 +155,7 @@ def test_stuck_posting_row_is_checked_not_reposted(server, client, storage, tmp_
     storage.enqueue(s.feed_room, "digest", marker, marker, T(-30))
     row = storage.outbox_pending()[0]
     storage.outbox_update(row["id"], "POSTING", T(-30), nonce=5, bump_attempts=True)   # crashed here yesterday
-    server.route(f"/r/{s.feed_room}?format=json&limit=50", body=room_json(s.feed_room, [msg(3, T(-29), ident.did, marker, 5)]))
+    server.route(f"/r/{s.feed_room}?format=json&limit=200", body=room_json(s.feed_room, [msg(3, T(-29), ident.did, marker, 5)]))
     cap = PostCapture(server, [])
     client._fetch = cap
     pub.flush_outbox(NOW)
