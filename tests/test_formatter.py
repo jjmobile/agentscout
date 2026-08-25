@@ -28,7 +28,8 @@ def test_disclaimer_cannot_be_duplicated_or_dropped():
 
 def test_sanitize_label():
     # the zero-width space is swept to a real space, quotes/pipes are replaced, then cut to 24
-    assert sanitize_label('Ev"il|name​' + "x" * 40) == "Ev'il/name…"           # cut at the word boundary
+    assert sanitize_label('Ev"il|name​' + "x" * 40) == "Ev'il/name xxxxxxxxxxxx…"   # boundary only used if in the 2nd half
+    assert sanitize_label("alpha beta gamma delta epsilon", 20) == "alpha beta gamma…"    # cut at the word boundary
     assert sanitize_label("x" * 40) == "x" * 23 + "…"                            # no boundary: hard cut
     assert sanitize_label("short name") == "short name"
 
