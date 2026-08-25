@@ -44,6 +44,8 @@ class Publisher:
             log.warning("cannot verify ownership of %s: %s", self.s.feed_room, exc)
             return False
         self.owner_verified = (val or "").strip() == self.id.did
+        if self.owner_verified:
+            log.info("feed room %s ownership verified for our DID — LIVE publishing enabled", self.s.feed_room)
         if not self.owner_verified:
             log.warning("feed room %s is not owned by our DID (owner note: %s); publishing disabled until claimed "
                         "(scripts/claim_room.py)", self.s.feed_room, (val or "absent")[:80])

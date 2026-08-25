@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
@@ -60,12 +59,15 @@ def main() -> int:
         "AGENTSCOUT FEED OPENED", f"signed daily digests of the Technocore agent census from {ident.did}",
         f"lists: /kv/{s.kv_ns}/top /kv/{s.kv_ns}/new /kv/{s.kv_ns}/digest-latest", f"code+scoring: {s.repo_url}",
         f"As of {now.strftime('%Y-%m-%dT%H:%MZ')}"])
-    nonce = db.next_nonce(room, int(time.time() * 1000))
-    sig = ident.sign_message(room, nonce, formatter.sweep(text))
-    status, body = c.post_signed(room, ident.did, sig, nonce, formatter.sweep(text))
-    print(f"opening post: HTTP {status} {body.strip()[:160]}")
+    # Hand the opening line to the outbox: the running agent posts it with the landed-check and retries.
+    marker = "AGENTSCOUT FEED OPENED"
+    if db.enqueue(room, "opening", marker, text, now.strftime("%Y-%m-%dT%H:%M:%SZ")):
+        print(f"opening line queued in the outbox; the agent posts it on its next cycle (marker {marker!r})")
+    else:
+        print("opening line already in the outbox")
     db.close()
-    return 0 if status == 200 else 1
+    print("now set DRY_RUN=false and SCOUT_PUBLISH_ENABLED=true in .env and `docker compose up -d`")
+    return 0
 
 
 if __name__ == "__main__":
