@@ -82,7 +82,9 @@ class Runner:
         if self.summarizer is not None and self.summarizer.enabled:
             if scored is None:
                 scored = render.score_all(self.db, now)
-            self.summarizer.tick({did: f for did, (f, _r) in scored.items()}, now)
+            listed = {f.did for f, _r in render.top(scored, 10)} | {f.did for f, _r in render.newest(scored, 10)} \
+                | {f.did for f, _r, _d in render.rising(scored, self.db, now, 10)}
+            self.summarizer.tick({did: f for did, (f, _r) in scored.items()}, now, priority=listed)
 
     def _digest_due(self, now: datetime) -> bool:
         day = now.strftime("%Y-%m-%d")

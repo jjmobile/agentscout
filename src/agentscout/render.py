@@ -156,34 +156,69 @@ def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
 
 # ---- Telegram (multi-line, plain text) --------------------------------------------------------------
 
-def telegram_list(rows: List[Tuple[AgentFacts, ScoreResult]], title: str, now: datetime) -> str:
+_KEYCAPS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
+
+def _keycap(i: int) -> str:
+    return _KEYCAPS[i - 1] if 1 <= i <= len(_KEYCAPS) else f"{i}."
+
+
+def _name_part(f: AgentFacts) -> str:
+    return f' "{formatter.sanitize_label(f.name)}"' if f.name else ""
+
+
+def _stats_line(f: AgentFacts) -> str:
+    bits = [f"{f.signed_msgs} msgs", f"{f.days_seen} day{'s' if f.days_seen != 1 else ''}", f"{len(f.rooms)} room{'s' if len(f.rooms) != 1 else ''}"]
+    if f.replies_raw:
+        bits.append(f"{f.replies_raw} replies")
+    if f.owned_rooms:
+        bits.append(f"owns {len(f.owned_rooms)}")
+    if f.artifacts_ok:
+        bits.append(f"{f.artifacts_ok} artifact{'s' if f.artifacts_ok != 1 else ''}")
+    return " · ".join(bits)
+
+
+def telegram_list(rows: List[Tuple[AgentFacts, ScoreResult]], title: str, now: datetime, extra: Optional[Dict[str, str]] = None) -> str:
+    """One block per agent: id + name, score/conf, summary, stats, and the exact /who command to copy."""
     if not rows:
-        return f"{title}: nothing to show yet.\n{formatter.DISCLAIMER}"
-    lines = [f"{title} — {now.strftime('%Y-%m-%d %H:%M')}Z",
-             "AI agents on technocore.chat, ranked by what they actually do (score 0-99, conf = how well observed).", ""]
+        return f"{title}\nNothing to show yet — the census is still filling in.\n{formatter.DISCLAIMER}"
+    lines = [f"{title} · {now.strftime('%Y-%m-%d %H:%M')} UTC",
+             "AI agents on technocore.chat, ranked by what they actually do.", ""]
     for i, (f, r) in enumerate(rows, 1):
-        lines.append(f"{i}. {_item(f, r)}")
-    lines.append("")
-    lines.append("names are self-asserted · /who <fp> for details · /help explains")
+        lines.append(f"{_keycap(i)} {f.fp[:8]}{_name_part(f)}")
+        tail = f"   {(extra or {}).get(f.did, '')}".rstrip() if extra and f.did in extra else ""
+        lines.append(f"   ⭐ score {r.score} · 👁 conf {r.confidence}" + (f" · {tail.strip()}" if tail else ""))
+        if f.summary:
+            lines.append(f"   📝 {formatter.sanitize_label(f.summary, 160)}")
+        lines.append(f"   📊 {_stats_line(f)}")
+        lines.append(f"   → /who {f.fp[:8]}")
+        lines.append("")
+    lines.append('Names in quotes are chosen by the agents themselves (unverified). 📝 = Claude summary of the agent\'s own messages; missing = not summarised yet.')
     lines.append(formatter.DISCLAIMER)
     return formatter.sweep_lines("\n".join(lines))
 
 
 def telegram_who(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
-    name = formatter.sanitize_label(f.name) if f.name else "-"
-    lines = [
-        f"{f.fp}  name(self-asserted): {name}",
-        f"{f.did}",
-        f"score {r.score} · confidence {r.confidence}",
-        f"first seen {f.first_seen[:16]}Z · last seen {f.last_seen[:16]}Z",
-        f"{f.signed_msgs} signed msgs · {f.days_seen} days · rooms: {', '.join(f.rooms[:8])}{'…' if len(f.rooms) > 8 else ''}",
-        f"replies from others {f.replies_raw} · owned rooms {len(f.owned_rooms)} · resolving artifacts {f.artifacts_ok}/{f.artifacts_total}",
-    ]
+    name = formatter.sanitize_label(f.name) if f.name else None
+    rooms = ", ".join(f.rooms[:8]) + ("…" if len(f.rooms) > 8 else "")
+    lines = [f"🔎 {f.fp[:8]}" + (f' "{name}" (self-chosen name)' if name else " (no name given)"),
+             f"DID: {f.did}", "",
+             f"⭐ score {r.score} — how substantive the observed activity looks",
+             f"👁 confidence {r.confidence} — how well observed so far"]
     if f.summary:
-        lines.append(f"appears to: {formatter.sanitize_label(f.summary, 160)} [{f.category}, model signal {f.llm_signal}]")
+        lines.append(f"📝 appears to: {formatter.sanitize_label(f.summary, 160)}  [{f.category}]")
+    else:
+        lines.append("📝 no Claude summary yet")
+    lines += ["",
+              f"📅 first seen {f.first_seen[:16].replace('T', ' ')} UTC · last seen {f.last_seen[:16].replace('T', ' ')} UTC",
+              f"💬 {f.signed_msgs} signed messages over {f.days_seen} day{'s' if f.days_seen != 1 else ''}",
+              f"🏠 rooms ({len(f.rooms)}): {rooms}",
+              f"🤝 replies from other agents: {f.replies_raw}",
+              f"🔑 owned rooms: {len(f.owned_rooms)}" + (f" ({', '.join(f.owned_rooms[:3])})" if f.owned_rooms else ""),
+              f"📦 artifacts that resolve: {f.artifacts_ok} of {f.artifacts_total} referenced"]
     if r.penalties:
-        lines.append("penalties: " + ", ".join(f"{k} -{v}" for k, v in r.penalties.items()))
+        lines.append("⚠️ penalties: " + ", ".join(f"{k} −{v}" for k, v in r.penalties.items()))
     if f.sample:
-        lines.append(f"latest: {formatter.sanitize_label(f.sample, 140)}")
-    lines.append(formatter.DISCLAIMER)
+        lines += ["", f"🗨 latest message: \"{formatter.sanitize_label(f.sample, 140)}\""]
+    lines += ["", formatter.DISCLAIMER]
     return formatter.sweep_lines("\n".join(lines))

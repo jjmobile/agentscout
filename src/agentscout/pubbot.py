@@ -26,7 +26,7 @@ COMMANDS: Dict[str, str] = {
     "top": "best-scored agents (confidence >= 40), e.g. /top 5",
     "newest": "most recently first-seen signed agents",
     "rising": "largest 7-day score gains",
-    "who": "one agent by fingerprint or did:key, e.g. /who b6711fbd",
+    "who": "details for one agent — use the 8-char id from a list, e.g. /who b6711fbd",
     "digest": "today's digest line",
     "stats": "census size",
     "help": "this list",
@@ -36,7 +36,7 @@ ABOUT = ("AgentScout watches the public rooms of technocore.chat — a chat netw
          "Scores come from observed behaviour (activity, replies from others, working artifacts), never from opinions.")
 SHORT_DESCRIPTION = "Scoreboard of AI agents on technocore.chat, ranked by what they actually do. Try /top"
 DESCRIPTION = ABOUT + " Commands: /top /newest /rising /who <fp> /digest /stats /help. Observed behaviour, no endorsements."
-_CMD_RE = re.compile(r"^/([a-z]+)(?:@[A-Za-z0-9_]+)?(?:\s+(.{0,80}))?$")
+_CMD_RE = re.compile(r"^/([A-Za-z]+)(?:@[A-Za-z0-9_]+)?(?:\s+(.{0,80}))?$")
 _ARG_RE = re.compile(r"^[A-Za-z0-9:._-]{1,80}$")
 SCORE_CACHE_SECONDS = 60
 MAX_REPLY = 3500
@@ -177,8 +177,11 @@ class PublicBot:
         now = self._now()
         if cmd in ("help", "start"):
             lines = [ABOUT, "",
-                     "What the numbers mean: score = how substantive the observed activity looks (0-99); "
-                     "confidence = how well the agent has been observed so far (0-99). Names are self-asserted labels.", "",
+                     "How to read a list line:",
+                     "1️⃣ b6711fbd \"name\" — the 8-character id, then the name the agent gave itself (unverified)",
+                     "⭐ score = how substantive its observed activity looks (0-99)",
+                     "👁 conf = how well it has been observed so far (0-99; new agents start low)",
+                     "📝 appears to: a one-line summary, written by Claude from the agent's own messages", "",
                      "Commands:"] + [f"/{k} — {v}" for k, v in COMMANDS.items()] + \
                     ["", "Scoring rules: https://github.com/jjmobile/agentscout/blob/main/SCORING.md"]
             return "\n".join(lines)
@@ -188,20 +191,24 @@ class PublicBot:
         scored = self._scored(db)
         n = _n(arg)
         if cmd == "top":
-            return render.telegram_list(render.top(scored, n), "TOP (confidence ≥ 40)", now)
+            return render.telegram_list(render.top(scored, n), "🏆 TOP (confidence ≥ 40)", now)
         if cmd == "newest":
-            return render.telegram_list(render.newest(scored, n), "NEWEST signed agents", now)
+            return render.telegram_list(render.newest(scored, n), "🆕 NEWEST signed agents", now)
         if cmd == "rising":
             rows = render.rising(scored, db, now, n)
-            return render.telegram_list([(f, r) for f, r, _ in rows], "RISING (7-day gain)", now)
+            return render.telegram_list([(f, r) for f, r, _ in rows], "📈 RISING (7-day gain)", now,
+                                        extra={f.did: f"+{d} this week" for f, _r, d in rows})
         if cmd == "digest":
             return render.digest_line(scored, db, now).replace(" | ", "\n")
         if cmd == "who":
             if not arg or not _ARG_RE.match(arg):
-                return "usage: /who <fingerprint or did:key>"
+                example = next((f.fp[:8] for f, _r in render.top(scored, 1)), "b6711fbd")
+                return (f"Usage: /who <id>\nThe id is the 8-character code shown at the start of every list line, e.g.\n/who {example}\n"
+                        f"A full did:key also works.")
             hit = render.who(scored, db, arg)
             if not hit:
-                return "not in the census (only signed did:key senders seen in watched rooms are listed)"
+                return ("No agent with that id in the census.\nOnly agents that sign their messages (did:key) and were seen in the watched rooms are listed. "
+                        "Use the 8-character id from /top or /newest, e.g. /who " + next((f.fp[:8] for f, _r in render.top(scored, 1)), "b6711fbd"))
             return render.telegram_who(*hit, now)
         return "unknown command — /help"
 
@@ -210,7 +217,7 @@ def parse_command(text: str) -> Optional[Tuple[str, Optional[str]]]:
     m = _CMD_RE.match(text.strip())
     if not m:
         return None
-    cmd, arg = m.group(1), (m.group(2) or "").strip() or None
+    cmd, arg = m.group(1).lower(), (m.group(2) or "").strip() or None
     if cmd not in COMMANDS and cmd != "start":
         return None
     if arg is not None and not _ARG_RE.match(arg):

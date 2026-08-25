@@ -14,6 +14,8 @@ def test_parse_only_exact_commands():
     assert parse_command("/top") == ("top", None)
     assert parse_command("/top 7") == ("top", "7")
     assert parse_command("/who@tc_public_bot b6711fbd") == ("who", "b6711fbd")
+    assert parse_command("/WHO b6711fbd") == ("who", "b6711fbd")      # case-insensitive
+    assert parse_command("/Top 3") == ("top", "3")
     assert parse_command("/who ../etc; rm -rf") == ("who", None)   # argument rejected, command kept
     assert parse_command("hello there") is None
     assert parse_command("/rankme now") is None
@@ -60,7 +62,7 @@ def test_answers_commands_and_ignores_free_text(tmp_path):
         bot._handle(db, u)
     assert bot.answered == 3 and bot.ignored == 1
     texts = [m["text"] for m in tg.sent]
-    assert "TOP" in texts[0] and "NEWEST" in texts[1]
+    assert "TOP" in texts[0] and "NEWEST" in texts[1] and "1️⃣" in texts[1] and "→ /who " in texts[1]
     assert DID_A in texts[2] and "score" in texts[2]
     assert all(t.endswith("Observed behaviour, not endorsement.") for t in texts)
     assert "\n" in texts[1]

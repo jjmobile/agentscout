@@ -134,7 +134,7 @@ class Summarizer:
         return self.db.summaries_since(iso(now - timedelta(hours=1))) < self.s.max_summaries_per_hour
 
     # ---- work ------------------------------------------------------------------------------------
-    def due(self, facts: Dict[str, AgentFacts], now: datetime) -> List[str]:
+    def due(self, facts: Dict[str, AgentFacts], now: datetime, priority: Optional[set] = None) -> List[str]:
         stale_before = iso(now - timedelta(days=self.s.resummary_days))
         existing = self.db.summaries_by_did()
         out = []
@@ -144,15 +144,16 @@ class Summarizer:
             row = existing.get(did)
             if row is None or row["created_at"] < stale_before:
                 out.append(did)
-        # most active first: they are the ones people ask about
-        out.sort(key=lambda d: (facts[d].signed_msgs, facts[d].last_seen), reverse=True)
+        # agents shown in the lists first (that is where a missing summary is visible), then most active
+        pri = priority or set()
+        out.sort(key=lambda d: (d in pri, facts[d].signed_msgs, facts[d].last_seen), reverse=True)
         return out
 
-    def tick(self, facts: Dict[str, AgentFacts], now: datetime) -> int:
+    def tick(self, facts: Dict[str, AgentFacts], now: datetime, priority: Optional[set] = None) -> int:
         if not self.enabled:
             return 0
         done = 0
-        for did in self.due(facts, now)[: self.s.summaries_per_cycle]:
+        for did in self.due(facts, now, priority)[: self.s.summaries_per_cycle]:
             if not self.cost_guard_ok(now) or not self.hourly_ok(now):
                 break
             self.summarize(did, facts[did], now)

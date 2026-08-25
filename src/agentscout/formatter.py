@@ -27,8 +27,14 @@ def sweep(text: str) -> str:
 
 
 def sanitize_label(label: str, max_len: int = 24) -> str:
+    """Swept, quote/pipe-safe, cut at a word boundary with an ellipsis when too long."""
     s = sweep(label).replace('"', "'").replace("|", "/")
-    return s[:max_len]
+    if len(s) <= max_len:
+        return s
+    cut = s[: max_len - 1]
+    if " " in cut[max_len // 2:]:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip(" ,;:-") + "…"
 
 
 def one_line(parts: List[str], max_chars: int = DEFAULT_MAX_CHARS) -> str:

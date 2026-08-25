@@ -48,7 +48,8 @@ def settings(tmp_path, **kw):
 
 
 def seed(storage, did=DID_A, n=6):
-    rows = [(i, (NOW - timedelta(days=i % 3, minutes=i)).strftime("%Y-%m-%dT%H:%M:%SZ"), did, did, True, f"working on verify tool step {i}", f"h{i}") for i in range(1, n + 1)]
+    base = 0 if did == DID_A else 1000   # distinct seq ranges: (room, seq) is unique
+    rows = [(base + i, (NOW - timedelta(days=i % 3, minutes=i)).strftime("%Y-%m-%dT%H:%M:%SZ"), did, did, True, f"working on verify tool step {i}", f"h{i}") for i in range(1, n + 1)]
     storage.insert_messages("lobby", rows, T(0))
 
 
@@ -156,3 +157,11 @@ def test_renders_without_summaries(storage):
     assert render.digest_line(scored, storage, NOW)
     f, r = render.top(scored, 1)[0] if render.top(scored, 1) else render.newest(scored, 1)[0]
     assert render.telegram_who(f, r, NOW).endswith("Observed behaviour, not endorsement.")
+
+
+def test_listed_agents_are_summarised_first(storage, tmp_path):
+    seed(storage, DID_A, n=6); seed(storage, DID_B, n=12)
+    fm = FakeMessages([resp(good())])
+    sm = Summarizer(settings(tmp_path, summaries_per_cycle=1), storage, SimpleNamespace(messages=fm), pricing=PRICING, system_prompt="SYS")
+    assert sm.due(facts_of(storage), NOW)[0] == DID_B                       # most active first by default
+    assert sm.due(facts_of(storage), NOW, priority={DID_A})[0] == DID_A     # but listed agents win
