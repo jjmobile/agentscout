@@ -46,9 +46,10 @@ def test_log_handler_forwards_warnings_only():
     h = TelegramLogHandler(n)
     lg = logging.getLogger("agentscout.test")
     lg.addHandler(h)
-    lg.warning("boom")
+    lg.error("boom")
+    lg.warning("plain warning from a non-publisher logger is not forwarded")
     lg.info("quiet")
-    logging.getLogger("agentscout.notify").warning("never forwarded")
+    logging.getLogger("agentscout.notify").error("never forwarded")
     lg.removeHandler(h)
     assert len(p.calls) == 1 and b"boom" in p.calls[0][1]
 
@@ -59,3 +60,28 @@ def test_load_token_prefers_file(tmp_path):
     assert load_token(str(f), "env") == "abc"
     assert load_token(str(tmp_path / "missing"), "env") == "env"
     assert load_token(str(tmp_path / "missing"), "") is None
+
+
+def test_log_handler_filters_transient_noise_and_counts():
+    from agentscout.notify import OpsCounter
+    p = Poster()
+    n = TelegramNotifier("t", "1", poster=p)
+    counter = OpsCounter()
+    h = TelegramLogHandler(n, counter)
+    ing = logging.getLogger("agentscout.ingest.test")
+    pub = logging.getLogger("agentscout.publisher.test")
+    ing.addHandler(h); pub.addHandler(h)
+    ing.warning("room x: GET /r/x: HTTP 500")
+    ing.warning("sequence gap in lobby: expected 1, first available 9")
+    ing.warning("write /kv/did/abc: HTTP 500 Internal Server Error")
+    ing.warning("TECHNOCORE VERSION CHANGED 0.7.0 -> 0.8.0")
+    pub.warning("NOTE_TAMPERED /kv/agentscout/top")
+    pub.warning("post to d-x rejected (400)")
+    ing.error("cycle failed")
+    ing.removeHandler(h); pub.removeHandler(h)
+    sent = [c[1].decode() for c in p.calls]
+    assert len(sent) == 4
+    assert any("VERSION CHANGED" in s for s in sent) and any("NOTE_TAMPERED" in s for s in sent) and any("cycle failed" in s for s in sent)
+    assert counter.counts == {"transient_http_errors": 2, "ring_gaps": 1}
+    assert counter.summary_and_reset() == "1 ring gaps, 2 transient http errors"
+    assert counter.counts == {}

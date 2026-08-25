@@ -254,10 +254,11 @@ class Storage:
         row = self.conn.execute("SELECT * FROM agents WHERE did=? OR fp=?", (needle, needle.lower())).fetchone()
         if row:
             return row
-        if len(needle) >= 6:
+        z = needle[len("did:key:"):] if needle.startswith("did:key:") else needle
+        if len(z) >= 6:
             return self.conn.execute(
                 "SELECT * FROM agents WHERE fp LIKE ? OR did LIKE ? ORDER BY did LIMIT 1",
-                (needle.lower() + "%", "did:key:" + needle + "%"),
+                (z.lower() + "%", "did:key:" + z + "%"),
             ).fetchone()
         return None
 

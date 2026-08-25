@@ -24,8 +24,10 @@ services:
       AGENTSCOUT_DB: /data/agentscout.db
       AGENTSCOUT_IDENTITY_KEY: /data/identity.key
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      TELEGRAM_PUBLIC_BOT_TOKEN_FILE: /run/secrets/telegram_public_bot_token
     secrets:
       - telegram_bot_token
+      - telegram_public_bot_token
     networks:
       - agentscout_net
     volumes:
@@ -41,4 +43,6 @@ volumes:
 
 secrets:
   telegram_bot_token:
-    file: ./secrets/telegram_bot_token.txt   # create it (may be empty to disable Telegram); git-ignored
+    file: ./secrets/telegram_bot_token.txt          # operator alerts; may be empty to disable; git-ignored
+  telegram_public_bot_token:
+    file: ./secrets/telegram_public_bot_token.txt   # public command bot; may be empty to disable; git-ignored

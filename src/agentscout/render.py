@@ -149,3 +149,34 @@ def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
         f"agentscout agent {f.fp} did={f.did} name={name} score={r.score} conf={r.confidence} msgs={f.signed_msgs} "
         f"days={f.days_seen} rooms={len(f.rooms)} replies={f.replies_raw} owned={len(f.owned_rooms)} artifacts={f.artifacts_ok} "
         f"first_seen={f.first_seen[:19]}Z asof={now.strftime('%Y-%m-%dT%H:%MZ')} observed-behaviour-not-endorsement")
+
+
+# ---- Telegram (multi-line, plain text) --------------------------------------------------------------
+
+def telegram_list(rows: List[Tuple[AgentFacts, ScoreResult]], title: str, now: datetime) -> str:
+    if not rows:
+        return f"{title}: nothing to show yet.\n{formatter.DISCLAIMER}"
+    lines = [f"{title} — {now.strftime('%Y-%m-%d %H:%M')}Z"]
+    for i, (f, r) in enumerate(rows, 1):
+        lines.append(f"{i}. {_item(f, r)}")
+    lines.append("names are self-asserted · /who <fp> for details")
+    lines.append(formatter.DISCLAIMER)
+    return formatter.sweep_lines("\n".join(lines))
+
+
+def telegram_who(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
+    name = formatter.sanitize_label(f.name) if f.name else "-"
+    lines = [
+        f"{f.fp}  name(self-asserted): {name}",
+        f"{f.did}",
+        f"score {r.score} · confidence {r.confidence}",
+        f"first seen {f.first_seen[:16]}Z · last seen {f.last_seen[:16]}Z",
+        f"{f.signed_msgs} signed msgs · {f.days_seen} days · rooms: {', '.join(f.rooms[:8])}{'…' if len(f.rooms) > 8 else ''}",
+        f"replies from others {f.replies_raw} · owned rooms {len(f.owned_rooms)} · resolving artifacts {f.artifacts_ok}/{f.artifacts_total}",
+    ]
+    if r.penalties:
+        lines.append("penalties: " + ", ".join(f"{k} -{v}" for k, v in r.penalties.items()))
+    if f.sample:
+        lines.append(f"latest: {formatter.sanitize_label(f.sample, 140)}")
+    lines.append(formatter.DISCLAIMER)
+    return formatter.sweep_lines("\n".join(lines))

@@ -13,7 +13,8 @@ from typing import Optional
 from . import __version__, render
 from .config import ConfigError, Settings
 from .identity import Identity
-from .notify import TelegramLogHandler, TelegramNotifier, load_token
+from .notify import OpsCounter, TelegramLogHandler, TelegramNotifier, load_token
+from .pubbot import PublicBot
 from .publisher import Publisher
 from .ingest import Ingestor
 from .logging_config import configure_logging
@@ -31,6 +32,7 @@ class Runner:
         self.client = client
         self.ing = Ingestor(settings, client, storage)
         self.notify = notifier or TelegramNotifier(None, None)
+        self.ops = OpsCounter()
         self.publisher: Optional[Publisher] = None
         self._sleep = sleep
         self._now = clock
@@ -82,7 +84,7 @@ class Runner:
         log.info("snapshot %s: %d agents scored; counts=%s", day, len(scored), c)
         preview = render.digest_line(scored, self.db, now)
         log.info("DIGEST PREVIEW: %s", preview)
-        self.notify.send(f"📊 daily snapshot {day}: {len(scored)} agents scored\n{preview}")
+        self.notify.send(f"📊 daily snapshot {day}: {len(scored)} agents scored\nops last 24h: {self.ops.summary_and_reset()}\n{preview}")
         return scored
 
     def run(self, once: bool = False) -> None:
@@ -112,14 +114,22 @@ def cli(argv=None) -> int:
     configure_logging(settings.log_level)
     token = load_token(settings.telegram_token_file, os.environ.get("TELEGRAM_BOT_TOKEN"))
     notifier = TelegramNotifier(token, settings.telegram_chat_id or None, settings.telegram_max_per_hour)
-    if notifier.enabled:
-        logging.getLogger().addHandler(TelegramLogHandler(notifier))
-        log.info("telegram reporting enabled (chat %s)", settings.telegram_chat_id)
-    else:
-        log.info("telegram reporting disabled (no token/chat id)")
     storage = Storage(settings.db_path)
     client = TechnocoreClient(settings.technocore_base_url, settings.max_reads_per_minute, settings.http_timeout)
     runner = Runner(settings, client, storage, notifier=notifier)
+    if notifier.enabled:
+        logging.getLogger().addHandler(TelegramLogHandler(notifier, runner.ops))
+        log.info("telegram reporting enabled (chat %s)", settings.telegram_chat_id)
+    else:
+        log.info("telegram reporting disabled (no token/chat id)")
+    public_token = load_token(settings.telegram_public_token_file, os.environ.get("TELEGRAM_PUBLIC_BOT_TOKEN"))
+    pubbot = None
+    if public_token:
+        pubbot = PublicBot(public_token, settings.db_path, settings.telegram_public_max_per_user_per_minute)
+        pubbot.start()
+        log.info("public telegram bot enabled")
+    else:
+        log.info("public telegram bot disabled (no token)")
 
     def _stop(signum, _frame):
         log.info("signal %s received; finishing cycle", signum)
@@ -130,6 +140,8 @@ def cli(argv=None) -> int:
     try:
         runner.run(once=args.once)
     finally:
+        if pubbot:
+            pubbot.stop()
         storage.close()
     return 0
 

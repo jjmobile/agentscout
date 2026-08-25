@@ -67,18 +67,58 @@ class TelegramNotifier:
         return True
 
 
-class TelegramLogHandler(logging.Handler):
-    """Forwards WARNING+ records to Telegram (subject to the notifier's hourly cap)."""
+import re as _re
+from collections import Counter
 
-    def __init__(self, notifier: TelegramNotifier, level: int = logging.WARNING):
+_TRANSIENT_RE = _re.compile(r"HTTP 5\d\d|sequence gap|429|connection error|unreachable|Internal Server Error", _re.IGNORECASE)
+
+
+class OpsCounter:
+    """Counts noisy-but-expected warnings so the daily report can say '37 transient 500s, 4 gaps'."""
+
+    def __init__(self):
+        self.counts: Counter = Counter()
+
+    def bucket(self, record: logging.LogRecord) -> Optional[str]:
+        msg = record.getMessage()
+        if "sequence gap" in msg:
+            return "ring_gaps"
+        if _TRANSIENT_RE.search(msg):
+            return "transient_http_errors"
+        return None
+
+    def summary_and_reset(self) -> str:
+        parts = [f"{v} {k.replace('_', ' ')}" for k, v in sorted(self.counts.items())] or ["no transient errors"]
+        self.counts.clear()
+        return ", ".join(parts)
+
+
+class TelegramLogHandler(logging.Handler):
+    """Forwards only actionable records: ERROR+ from anywhere, WARNING from the publisher (ownership, tamper,
+    post failures), and ingest warnings about protocol drift. Transient 5xx/429/gaps are counted, not sent."""
+
+    def __init__(self, notifier: TelegramNotifier, counter: Optional[OpsCounter] = None, level: int = logging.WARNING):
         super().__init__(level)
         self.notifier = notifier
+        self.counter = counter or OpsCounter()
+
+    def should_forward(self, record: logging.LogRecord) -> bool:
+        if record.name.startswith("agentscout.notify"):
+            return False
+        if self.counter.bucket(record):
+            self.counter.counts[self.counter.bucket(record)] += 1
+            return False
+        if record.levelno >= logging.ERROR:
+            return True
+        if record.name.startswith("agentscout.publisher"):
+            return True
+        msg = record.getMessage()
+        return "VERSION CHANGED" in msg or "NOTE_TAMPERED" in msg
 
     def emit(self, record: logging.LogRecord) -> None:
-        if record.name.startswith("agentscout.notify"):
-            return  # never loop on our own warnings
         try:
-            self.notifier.send(f"⚠️ {record.levelname} {record.name}: {record.getMessage()}"[:TELEGRAM_MAX_CHARS])
+            if self.should_forward(record):
+                self.notifier.send(f"⚠️ {record.levelname} {record.name}: {record.getMessage()}"[:TELEGRAM_MAX_CHARS])
         except Exception:  # a reporter must never break the agent
             pass
 

@@ -59,6 +59,17 @@ scripts/backup_identity.sh ~/agentscout-identity.key.bak     # do this once; a l
 The key is never printed, never committed, never regenerated on rebuild. In Milestone B this DID
 signs every published line; anyone can run this code, only this DID is the official instance.
 
+## Public Telegram bot (anyone can ask)
+A second bot answers exact commands from the census — deterministic, no LLM, no cost, no free text:
+`/top [n]`, `/newest [n]`, `/rising [n]`, `/who <fp|did>`, `/digest`, `/stats`, `/help` (n ≤ 10).
+Create it with @BotFather, put its token in `secrets/telegram_public_bot_token.txt`, restart. Per-user
+limit `TELEGRAM_PUBLIC_MAX_PER_USER_PER_MINUTE` (10) and 60/min global; anything that is not an exact command
+is ignored. It runs in its own thread with its own read connection to the census DB.
+
+Operator alerts (first bot) are filtered: ERROR+, publisher warnings (ownership, tamper, post failures) and
+protocol-version drift are forwarded; transient 5xx/429 and ring gaps are only counted and reported in the
+daily snapshot line ("ops last 24h: …").
+
 ## Going live (Milestone B) — three operator steps
 1. **Telegram (optional but recommended).** Create a bot with @BotFather, put the token in
    `secrets/telegram_bot_token.txt` (git-ignored), set `TELEGRAM_CHAT_ID` in `.env` (send the bot a
@@ -113,7 +124,7 @@ The same renderer will be used when Milestone B posts this to the owned feed roo
 
 ## Layout
 ```
-src/agentscout/  config.py technocore.py identity.py storage.py ingest.py census.py scoring.py formatter.py render.py main.py
+src/agentscout/  config.py technocore.py identity.py storage.py ingest.py census.py scoring.py formatter.py render.py publisher.py notify.py pubbot.py main.py
 scripts/report.py      local read-only report
 scripts/show_did.py    print the public DID;  scripts/backup_identity.sh  copy the key out of the volume
 scripts/claim_room.py  one-time ownership claim of the feed room

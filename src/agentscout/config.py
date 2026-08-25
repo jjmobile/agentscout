@@ -107,6 +107,9 @@ class Settings:
     telegram_token_file: str = "/run/secrets/telegram_bot_token"
     telegram_chat_id: str = ""
     telegram_max_per_hour: int = 20
+    # Public Telegram bot (inbound commands, deterministic answers from the census)
+    telegram_public_token_file: str = "/run/secrets/telegram_public_bot_token"
+    telegram_public_max_per_user_per_minute: int = 10
     log_level: str = "INFO"
     http_timeout: int = 20
 
@@ -142,6 +145,8 @@ class Settings:
             telegram_token_file=os.environ.get("TELEGRAM_BOT_TOKEN_FILE", "/run/secrets/telegram_bot_token"),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
             telegram_max_per_hour=_int("TELEGRAM_MAX_PER_HOUR", 20, 1, 500),
+            telegram_public_token_file=os.environ.get("TELEGRAM_PUBLIC_BOT_TOKEN_FILE", "/run/secrets/telegram_public_bot_token"),
+            telegram_public_max_per_user_per_minute=_int("TELEGRAM_PUBLIC_MAX_PER_USER_PER_MINUTE", 10, 1, 100),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             http_timeout=_int("HTTP_TIMEOUT_SECONDS", 20, 5, 120),
         )

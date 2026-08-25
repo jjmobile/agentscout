@@ -54,3 +54,8 @@ NOTE_MAX_CHARS = 3800  # notes allow 8192; stay well under
 def note_line(value: str, max_chars: int = NOTE_MAX_CHARS) -> str:
     """Machine-readable note value: swept, single line, bounded. No disclaimer (notes are data, not prose)."""
     return sweep(value)[:max_chars]
+
+
+def sweep_lines(text: str) -> str:
+    """Multi-line variant for Telegram: sweep each line, keep the newlines we put there ourselves."""
+    return "\n".join(sweep(line) for line in text.split("\n"))
