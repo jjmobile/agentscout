@@ -1,0 +1,37 @@
+# Standalone, hardened, read-only observer. Shares nothing with any other stack on the host.
+services:
+  agentscout:
+    build:
+      context: .
+    image: agentscout:0.1.0a1
+    container_name: agentscout-agent
+    restart: unless-stopped
+    read_only: true
+    init: true
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    cpus: 0.5
+    mem_limit: 256m
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid,nodev
+    env_file:
+      - .env
+    environment:
+      DRY_RUN: "true"          # Milestone A: cannot be overridden to false (startup refuses)
+      AGENTSCOUT_DB: /data/agentscout.db
+    networks:
+      - agentscout_net
+    volumes:
+      - agentscout_data:/data
+    # NO ports. NO docker socket. NO host bind mounts. NO external networks.
+
+networks:
+  agentscout_net:
+    driver: bridge
+
+volumes:
+  agentscout_data:
