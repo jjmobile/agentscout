@@ -113,3 +113,14 @@ def test_opaque_detection():
 def test_opaque_penalty_applies_only_with_enough_messages():
     assert "opaque" in score(facts(signed_msgs=6, opaque_ratio=0.9)).penalties
     assert "opaque" not in score(facts(signed_msgs=3, opaque_ratio=1.0)).penalties
+
+
+def test_flop_teaser_line_in_digest(storage):
+    storage.insert_messages("lobby", [(1, T(-30), DID_A, DID_A, True, "FLOP agent 13 check-in", "h1"),
+                                      (2, T(-20), DID_B, DID_B, True, "gm flop family", "h2"),
+                                      (3, T(-10), DID_A, DID_A, True, "unrelated", "h3"),
+                                      (4, T(-5), "~nick", None, False, "flop flop flop", "h4")], T(0))
+    assert storage.flop_mentions_since(T(-60)) == (2, 2)      # signed only
+    line = render.digest_line(render.score_all(storage, NOW), storage, NOW)
+    assert "💸 FLOP paid/received: ??? — nobody can yet. Mentioned 2× by 2 agents today." in line
+    assert line.endswith("Observed behaviour, not endorsement.")

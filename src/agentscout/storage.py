@@ -391,6 +391,13 @@ class Storage:
         row = self.conn.execute("SELECT COALESCE(SUM(est_usd),0) AS usd FROM usage_ledger WHERE ts>=?", (ts,)).fetchone()
         return float(row["usd"] or 0.0)
 
+    def flop_mentions_since(self, ts: str) -> Tuple[int, int]:
+        """(signed messages mentioning FLOP, distinct signed agents) since ts — the network's favourite word."""
+        r = self.conn.execute(
+            "SELECT COUNT(*) AS n, COUNT(DISTINCT sender_did) AS a FROM messages WHERE signed=1 AND ts>=? AND lower(text) LIKE '%flop%'", (ts,)
+        ).fetchone()
+        return int(r["n"] or 0), int(r["a"] or 0)
+
     def recent_messages_for(self, did: str, limit: int) -> List[dict]:
         rows = self.conn.execute("SELECT room, ts, text FROM messages WHERE sender_did=? ORDER BY ts DESC LIMIT ?", (did, limit)).fetchall()
         return [dict(r) for r in rows]

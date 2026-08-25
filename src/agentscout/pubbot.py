@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 from . import formatter, render
@@ -187,7 +187,9 @@ class PublicBot:
             return "\n".join(lines)
         if cmd == "stats":
             c = db.counts()
-            return f"census: {c['agents']} signed agents, {c['messages']} messages, {c['rooms_seen']} rooms seen, {c['did_notes']} DID notes\n" + formatter.DISCLAIMER
+            since = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            return (f"📚 census: {c['agents']:,} signed agents · {c['messages']:,} messages · {c['rooms_seen']:,} rooms seen · {c['did_notes']:,} DID notes\n"
+                    f"{render.flop_line(db, since)}\n" + formatter.DISCLAIMER)
         scored = self._scored(db)
         n = _n(arg)
         if cmd == "top":
