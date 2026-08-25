@@ -83,8 +83,13 @@ class Publisher:
 
     # ---- signed posting ------------------------------------------------------------------------
     def flush_outbox(self, now: datetime) -> None:
-        if not self.live or not self.owner_verified:
+        if not self.live:
             return
+        if not self.owner_verified:
+            # a transient 500 at startup must not silence publishing for the whole run: re-check every cycle
+            self.verify_ownership()
+            if not self.owner_verified:
+                return
         for row in self.db.outbox_stuck_posting(iso(now - timedelta(minutes=3))):
             log.warning("outbox %d (%s) was left in POSTING (restart mid-request?); checking whether it landed", row["id"], row["kind"])
             self._after_uncertain(row, now, "interrupted")

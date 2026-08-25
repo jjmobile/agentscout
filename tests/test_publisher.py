@@ -166,3 +166,17 @@ def test_stuck_posting_row_is_checked_not_reposted(server, client, storage, tmp_
     storage.outbox_update(r2["id"], "POSTING", T(-30), bump_attempts=True)
     pub.flush_outbox(NOW)
     assert storage.outbox_has(s.feed_room, "m2")["state"] in ("FAILED_RETRYABLE", "POSTED")
+
+
+def test_ownership_recheck_each_cycle_after_transient_failure(server, client, storage, tmp_path):
+    s, ident, pub = make(server, client, storage, tmp_path)
+    pub.owner_verified = False
+    server.route_sequence(f"/kv/room-owners/{s.feed_room}", [(500, {}, "boom"), (500, {}, "boom"), (500, {}, "boom"),
+                                                             (200, {}, f"!! UNTRUSTED\n\n{ident.did}\n")])
+    storage.enqueue(s.feed_room, "digest", "m", "m", T(0))
+    cap = PostCapture(server, [(200, {}, json.dumps(room_json(s.feed_room, [], last_seq=2)))])
+    client._fetch = cap
+    pub.flush_outbox(NOW)                       # 500s: still unverified, nothing posted
+    assert pub.owner_verified is False and cap.bodies == []
+    pub.flush_outbox(NOW)                       # now verified, and the queued line goes out
+    assert pub.owner_verified is True and len(cap.bodies) == 1
