@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 from collections import defaultdict
@@ -102,6 +103,11 @@ class AgentFacts:
     contract_spam_msgs: int = 0
     injection_msgs: int = 0
     opaque_ratio: float = 0.0  # share of messages that are ciphertext/base64/hash dumps
+    # Milestone C (optional decoration; every renderer works without it)
+    summary: Optional[str] = None
+    category: Optional[str] = None
+    llm_signal: Optional[int] = None
+    llm_flags: List[str] = field(default_factory=list)
     days_since_first_seen: float = 0.0
     sample: str = ""  # a short, swept excerpt of the most recent message (for humans only)
 
@@ -134,6 +140,7 @@ def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]
     notes = storage.notes_by_fp()
     owners = storage.owned_rooms_by_did()
     artifacts = storage.artifacts_by_did()
+    summaries = storage.summaries_by_did()
     by_did = _messages_by_did(messages)
     by_room: Dict[str, list] = defaultdict(list)
     for m in messages:
@@ -176,6 +183,13 @@ def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]
             f.sample = " ".join(latest["text"].split())[:140]
         f.owned_rooms = owners.get(did, [])
         f.artifacts_ok, f.artifacts_total = artifacts.get(did, (0, 0))
+        sm = summaries.get(did)
+        if sm is not None and not sm["error"] and sm["summary"]:
+            f.summary, f.category, f.llm_signal = sm["summary"], sm["category"], int(sm["signal"])
+            try:
+                f.llm_flags = list(json.loads(sm["flags"] or "[]"))
+            except ValueError:
+                f.llm_flags = []
         f.days_since_first_seen = max(0.0, (now - parse_ts(row["first_seen"])).total_seconds() / 86400.0)
         facts[did] = f
 

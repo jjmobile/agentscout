@@ -15,7 +15,7 @@ def test_base_url_ok():
 
 
 def test_refuses_unbuilt_milestone_flags(monkeypatch):
-    monkeypatch.setenv("SCOUT_LLM_ENABLED", "true")
+    monkeypatch.setenv("SCOUT_REPLIES_ENABLED", "true")
     with pytest.raises(ConfigError):
         Settings.from_env()
 

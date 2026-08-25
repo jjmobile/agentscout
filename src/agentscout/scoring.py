@@ -70,7 +70,14 @@ def score(f: AgentFacts, w: Weights = DEFAULT_WEIGHTS, p: Penalties = DEFAULT_PE
         pens["injection"] = p.injection
     if f.signed_msgs >= 4 and f.opaque_ratio > 0.5:
         pens["opaque"] = p.opaque
-    raw = sum(comps.values()) - sum(pens.values())
+    if f.injection_msgs < 1 and "injection-attempt" in f.llm_flags:
+        pens["injection"] = p.injection
+    deterministic = sum(comps.values())
+    if f.llm_signal is not None:
+        # Milestone C: the model's signal is blended at 10 %; it can never move an agent more than ~10 points
+        comps["llm_signal"] = round(0.1 * f.llm_signal, 2)
+        deterministic = 0.9 * deterministic
+    raw = deterministic + comps.get("llm_signal", 0.0) - sum(pens.values())
     s = int(round(min(99.0, max(0.0, raw))))
     return ScoreResult(score=s, confidence=confidence(f), components=comps, penalties=pens)
 

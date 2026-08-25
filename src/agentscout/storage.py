@@ -69,6 +69,20 @@ MIGRATIONS: List[str] = [
         tamper_events INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(ns, key)
     );
     """,
+    # v3 — Milestone C: Claude summaries + usage ledger
+    """
+    CREATE TABLE summaries (
+        did TEXT PRIMARY KEY, created_at TEXT NOT NULL, model TEXT NOT NULL, summary TEXT NOT NULL,
+        category TEXT NOT NULL, signal INTEGER NOT NULL, rationale TEXT NOT NULL, flags TEXT NOT NULL,
+        request_id TEXT, error TEXT
+    );
+    CREATE TABLE usage_ledger (
+        id INTEGER PRIMARY KEY, ts TEXT NOT NULL, purpose TEXT NOT NULL, did TEXT, model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_read INTEGER NOT NULL,
+        cache_write INTEGER NOT NULL, est_usd REAL NOT NULL, status TEXT NOT NULL
+    );
+    CREATE INDEX usage_ts ON usage_ledger(ts);
+    """,
 ]
 
 
@@ -337,6 +351,44 @@ class Storage:
             out[r["first_did"]] = (int(r["ok"] or 0), int(r["n"]))
         return out
 
+    # ---- summaries / usage (Milestone C) ------------------------------------------------------------
+    def summaries_by_did(self) -> Dict[str, sqlite3.Row]:
+        return {r["did"]: r for r in self.conn.execute("SELECT * FROM summaries")}
+
+    def upsert_summary(self, did: str, created_at: str, model: str, summary: str, category: str, signal: int,
+                       rationale: str, flags: List[str], request_id: Optional[str]) -> None:
+        self.conn.execute(
+            """INSERT INTO summaries(did,created_at,model,summary,category,signal,rationale,flags,request_id,error)
+               VALUES(?,?,?,?,?,?,?,?,?,NULL)
+               ON CONFLICT(did) DO UPDATE SET created_at=excluded.created_at, model=excluded.model, summary=excluded.summary,
+                 category=excluded.category, signal=excluded.signal, rationale=excluded.rationale, flags=excluded.flags,
+                 request_id=excluded.request_id, error=NULL""",
+            (did, created_at, model, summary, category, signal, rationale, json.dumps(flags), request_id))
+
+    def record_summary_error(self, did: str, error: str, now: str) -> None:
+        """Remember a failed/refused attempt so it is not retried every cycle (counts as a stale row)."""
+        self.conn.execute(
+            """INSERT INTO summaries(did,created_at,model,summary,category,signal,rationale,flags,request_id,error)
+               VALUES(?,?,'',"",'unknown',0,'','[]',NULL,?)
+               ON CONFLICT(did) DO UPDATE SET created_at=excluded.created_at, error=excluded.error""",
+            (did, now, error))
+
+    def summaries_since(self, ts: str) -> int:
+        return self.conn.execute("SELECT COUNT(*) AS n FROM usage_ledger WHERE ts>=? AND purpose='summary'", (ts,)).fetchone()["n"]
+
+    def usage_insert(self, ts: str, purpose: str, did: Optional[str], model: str, it: int, ot: int, cr: int, cw: int, usd: float, status: str) -> None:
+        self.conn.execute(
+            "INSERT INTO usage_ledger(ts,purpose,did,model,input_tokens,output_tokens,cache_read,cache_write,est_usd,status) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (ts, purpose, did, model, it, ot, cr, cw, usd, status))
+
+    def usage_usd_since(self, ts: str) -> float:
+        row = self.conn.execute("SELECT COALESCE(SUM(est_usd),0) AS usd FROM usage_ledger WHERE ts>=?", (ts,)).fetchone()
+        return float(row["usd"] or 0.0)
+
+    def recent_messages_for(self, did: str, limit: int) -> List[dict]:
+        rows = self.conn.execute("SELECT room, ts, text FROM messages WHERE sender_did=? ORDER BY ts DESC LIMIT ?", (did, limit)).fetchall()
+        return [dict(r) for r in rows]
+
     # ---- snapshots ------------------------------------------------------------------------
     def save_snapshot(self, day: str, rows: Iterable[Tuple[str, int, int, dict]]) -> None:
         self.conn.execute("BEGIN")
@@ -362,7 +414,7 @@ class Storage:
 
     def counts(self) -> Dict[str, int]:
         out = {}
-        for table in ("messages", "agents", "did_notes", "room_owners", "artifact_refs", "rooms_seen", "sequence_gaps", "room_state", "outbox", "published_notes"):
+        for table in ("messages", "agents", "did_notes", "room_owners", "artifact_refs", "rooms_seen", "sequence_gaps", "room_state", "outbox", "published_notes", "summaries", "usage_ledger"):
             out[table] = self.conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
         return out
 

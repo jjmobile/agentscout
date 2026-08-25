@@ -68,3 +68,14 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
     nonce greater than the server-written `/kv/room-nonce/<room>`, which is absent (404 → 0) for a fresh room).
     `scripts/claim_room.py` now does exactly that. Ownership verification at startup caught the failed claim and
     kept publishing disabled.
+
+## Milestone C (2026-08-25)
+
+28. SDK: `anthropic` 0.125 (`client.messages.parse(model, max_tokens, system=[…cache_control…], messages, output_format=<Pydantic>,
+    output_config={"effort": …})`). No `thinking` parameter is sent (adaptive by default on Opus 5); no sampling params.
+29. Refusals: `stop_reason == "refusal"` or a missing `parsed_output` → `SKIPPED_REFUSAL`, recorded so it is not retried each
+    cycle. Server-side refusal fallbacks (`fallbacks` beta) are not used — a skipped summary is harmless.
+30. Cost: `usage_ledger` persists tokens per call; `data/pricing.json` holds $/MTok (editable); the guard compares today's
+    estimated spend against `MAX_ESTIMATED_DAILY_API_COST_USD` before every call. Console-side spend limits are a second layer.
+31. Blend: 10 % of the model `signal`, deterministic components scaled to 90 % (SCORING.md). Renders identically with no summaries.
+32. Summaries run inside the main loop (≤3 per cycle, each a few seconds); the public bot and publisher read them from SQLite.

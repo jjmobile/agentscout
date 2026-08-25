@@ -14,7 +14,7 @@ See [SCORING.md](SCORING.md) for the exact formulas and their limits.
 |---|---|---|
 | **A** | ingest → SQLite → score/confidence → digest preview + `scripts/report.py` | **this build** |
 | **B** | claim `d-agentscout-feed`, post signed daily digest + weekly top-10, refresh kv lists, DID-note keepalive, Telegram reporting | **built** (off by default) |
-| C | Claude-written one-line summaries (Anthropic API) | not built |
+| **C** | Claude one-line summaries + category (Anthropic API), 10 % score blend, cost guard | **built** (off by default) |
 | D/E | `SCOUT:` replies in an open room; free-text questions | not built |
 
 Startup refuses the unbuilt milestones' flags (LLM/replies). Publishing needs `DRY_RUN=false` **and** `SCOUT_PUBLISH_ENABLED=true` **and** a feed room whose owner note is our DID — otherwise the loop runs read-only and only logs what it would post.
@@ -58,6 +58,21 @@ scripts/backup_identity.sh ~/agentscout-identity.key.bak     # do this once; a l
 ```
 The key is never printed, never committed, never regenerated on rebuild. In Milestone B this DID
 signs every published line; anyone can run this code, only this DID is the official instance.
+
+## Claude summaries (Milestone C)
+Optional decoration: one structured call per qualified agent (`messages.parse` with a Pydantic schema,
+`claude-opus-5` by default, `effort=low`, cached system prompt). Enable with:
+```bash
+echo 'sk-ant-…' > secrets/anthropic_api_key.txt      # dedicated key, git-ignored, mounted as a Docker secret
+# .env: SCOUT_LLM_ENABLED=true
+docker compose up -d
+```
+Guards, all enforced *before* a call: startup smoke check (a failing SDK disables summaries, not the agent),
+`MAX_ESTIMATED_DAILY_API_COST_USD` (3.00) from the persisted usage ledger + `data/pricing.json`,
+`SCOUT_MAX_SUMMARIES_PER_HOUR` (20), `SCOUT_SUMMARIES_PER_CYCLE` (3). Evidence is delimited, swept and
+size-bounded; the schema rejects anything outside the enum/ranges; refusals are skipped. Everything —
+digest, kv notes, Telegram answers — works with summaries absent; with them, each agent line gains
+"appears to: …". Operator choice: `SCOUT_MODEL=claude-sonnet-5` or `claude-haiku-4-5` for lower cost.
 
 ## Public Telegram bot (anyone can ask)
 A second bot answers exact commands from the census — deterministic, no LLM, no cost, no free text:
@@ -124,7 +139,8 @@ The same renderer will be used when Milestone B posts this to the owned feed roo
 
 ## Layout
 ```
-src/agentscout/  config.py technocore.py identity.py storage.py ingest.py census.py scoring.py formatter.py render.py publisher.py notify.py pubbot.py main.py
+src/agentscout/  config.py technocore.py identity.py storage.py ingest.py census.py scoring.py formatter.py render.py publisher.py notify.py pubbot.py summarizer.py main.py
+src/agentscout/data/  system_prompt.txt pricing.json
 scripts/report.py      local read-only report
 scripts/show_did.py    print the public DID;  scripts/backup_identity.sh  copy the key out of the volume
 scripts/claim_room.py  one-time ownership claim of the feed room

@@ -35,6 +35,28 @@ def _int(name: str, default: int, lo: int, hi: int) -> int:
     return val
 
 
+def _float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        val = float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: expected a number, got {raw!r}") from exc
+    if val < 0:
+        raise ConfigError(f"{name}: must be >= 0")
+    return val
+
+
+def _effort(raw: str) -> str:
+    val = (raw or "").strip().lower()
+    if val == "":
+        return ""
+    if val not in ("low", "medium", "high", "xhigh", "max"):
+        raise ConfigError(f"SCOUT_EFFORT: unknown level {raw!r}")
+    return val
+
+
 ROOM_NAME_RE = r"^[a-z0-9][a-z0-9_-]{0,47}$"
 
 
@@ -107,6 +129,17 @@ class Settings:
     telegram_token_file: str = "/run/secrets/telegram_bot_token"
     telegram_chat_id: str = ""
     telegram_max_per_hour: int = 20
+    # Milestone C — Claude summaries
+    model: str = "claude-opus-5"
+    effort: str = "low"
+    max_tokens: int = 1024
+    max_summaries_per_hour: int = 20
+    summaries_per_cycle: int = 3
+    resummary_days: int = 7
+    cost_guard_enabled: bool = True
+    max_daily_cost_usd: float = 3.0
+    anthropic_key_file: str = "/run/secrets/anthropic_api_key"
+    claude_startup_smoke: bool = True
     # Public Telegram bot (inbound commands, deterministic answers from the census)
     telegram_public_token_file: str = "/run/secrets/telegram_public_bot_token"
     telegram_public_max_per_user_per_minute: int = 10
@@ -145,14 +178,24 @@ class Settings:
             telegram_token_file=os.environ.get("TELEGRAM_BOT_TOKEN_FILE", "/run/secrets/telegram_bot_token"),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
             telegram_max_per_hour=_int("TELEGRAM_MAX_PER_HOUR", 20, 1, 500),
+            model=os.environ.get("SCOUT_MODEL", "claude-opus-5").strip(),
+            effort=_effort(os.environ.get("SCOUT_EFFORT", "low")),
+            max_tokens=_int("SCOUT_MAX_TOKENS", 1024, 256, 16000),
+            max_summaries_per_hour=_int("SCOUT_MAX_SUMMARIES_PER_HOUR", 20, 0, 1000),
+            summaries_per_cycle=_int("SCOUT_SUMMARIES_PER_CYCLE", 3, 0, 50),
+            resummary_days=_int("SCOUT_RESUMMARY_DAYS", 7, 1, 90),
+            cost_guard_enabled=_bool("COST_GUARD_ENABLED", True),
+            max_daily_cost_usd=_float("MAX_ESTIMATED_DAILY_API_COST_USD", 3.0),
+            anthropic_key_file=os.environ.get("ANTHROPIC_API_KEY_FILE", "/run/secrets/anthropic_api_key"),
+            claude_startup_smoke=_bool("CLAUDE_STARTUP_SMOKE", True),
             telegram_public_token_file=os.environ.get("TELEGRAM_PUBLIC_BOT_TOKEN_FILE", "/run/secrets/telegram_public_bot_token"),
             telegram_public_max_per_user_per_minute=_int("TELEGRAM_PUBLIC_MAX_PER_USER_PER_MINUTE", 10, 1, 100),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             http_timeout=_int("HTTP_TIMEOUT_SECONDS", 20, 5, 120),
         )
-        # Milestones C–E are not built: refuse to start with their flags on.
-        if s.llm_enabled or s.replies_enabled or s.freetext_queries:
-            raise ConfigError("Milestone B build: SCOUT_LLM_ENABLED / SCOUT_REPLIES_ENABLED / SCOUT_FREETEXT_QUERIES must be false.")
+        # Milestones D–E are not built: refuse to start with their flags on.
+        if s.replies_enabled or s.freetext_queries:
+            raise ConfigError("SCOUT_REPLIES_ENABLED / SCOUT_FREETEXT_QUERIES are not implemented in this build.")
         if s.publish_enabled and s.dry_run:
             raise ConfigError("SCOUT_PUBLISH_ENABLED=true requires DRY_RUN=false.")
         if not s.feed_room.startswith("d-"):

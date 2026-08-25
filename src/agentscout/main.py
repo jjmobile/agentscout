@@ -15,6 +15,7 @@ from .config import ConfigError, Settings
 from .identity import Identity
 from .notify import OpsCounter, TelegramLogHandler, TelegramNotifier, load_token
 from .pubbot import PublicBot
+from .summarizer import Summarizer, make_client
 from .publisher import Publisher
 from .ingest import Ingestor
 from .logging_config import configure_logging
@@ -34,6 +35,7 @@ class Runner:
         self.notify = notifier or TelegramNotifier(None, None)
         self.ops = OpsCounter()
         self.publisher: Optional[Publisher] = None
+        self.summarizer: Optional[Summarizer] = None
         self._sleep = sleep
         self._now = clock
         self.stop = False
@@ -48,8 +50,12 @@ class Runner:
         self.publisher = Publisher(self.s, self.client, self.db, ident, notify=self.notify)
         if self.s.will_publish:
             self.publisher.verify_ownership()
+        if self.summarizer is not None and self.summarizer.enabled and self.s.claude_startup_smoke:
+            self.summarizer.smoke()
+        llm = "on (%s, effort %s, cap $%.2f/day)" % (self.s.model, self.s.effort or "default", self.s.max_daily_cost_usd) \
+            if (self.summarizer is not None and self.summarizer.enabled) else "off"
         mode = "LIVE publishing to /r/%s" % self.s.feed_room if (self.s.will_publish and self.publisher.owner_verified) else "dry-run (nothing is posted)"
-        self.notify.send(f"AgentScout {__version__} started — {mode}\nDID {ident.did}\nfp {ident.fp}\ntelegram reporting on")
+        self.notify.send(f"AgentScout {__version__} started — {mode}\nDID {ident.did}\nfp {ident.fp}\nClaude summaries {llm}\ntelegram reporting on")
         self.ing.discover_limits()
         now = self._now()
         if not self.db.get_setting("observation_started_at"):
@@ -69,6 +75,10 @@ class Runner:
             if scored is None and self._digest_due(now):
                 scored = render.score_all(self.db, now)
             self.publisher.tick(now, scored)
+        if self.summarizer is not None and self.summarizer.enabled:
+            if scored is None:
+                scored = render.score_all(self.db, now)
+            self.summarizer.tick({did: f for did, (f, _r) in scored.items()}, now)
 
     def _digest_due(self, now: datetime) -> bool:
         day = now.strftime("%Y-%m-%d")
@@ -122,6 +132,11 @@ def cli(argv=None) -> int:
         log.info("telegram reporting enabled (chat %s)", settings.telegram_chat_id)
     else:
         log.info("telegram reporting disabled (no token/chat id)")
+    if settings.llm_enabled:
+        api_key = load_token(settings.anthropic_key_file, os.environ.get("ANTHROPIC_API_KEY"))
+        runner.summarizer = Summarizer(settings, storage, make_client(api_key), notify=notifier)
+        if api_key is None:
+            runner.summarizer.disable("SCOUT_LLM_ENABLED=true but no API key at %s" % settings.anthropic_key_file)
     public_token = load_token(settings.telegram_public_token_file, os.environ.get("TELEGRAM_PUBLIC_BOT_TOKEN"))
     pubbot = None
     if public_token:

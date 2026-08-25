@@ -37,7 +37,8 @@ def _item(f: AgentFacts, r: ScoreResult) -> str:
         bits.append(f"{f.artifacts_ok} kv artifacts")
     if f.replies_raw:
         bits.append(f"{f.replies_raw} replies")
-    return f"{_label(f)} — {', '.join(bits)} (score {r.score}, conf {r.confidence})"
+    what = f"{formatter.sanitize_label(f.summary, 160)} · " if f.summary else ""
+    return f"{_label(f)} — {what}{', '.join(bits)} (score {r.score}, conf {r.confidence})"
 
 
 def newest(scored: Scored, n: int = 5) -> List[Tuple[AgentFacts, ScoreResult]]:
@@ -115,6 +116,7 @@ def explain(f: AgentFacts, r: ScoreResult) -> str:
         "max_per_hour": f.max_per_hour, "cross_room_identical": f.cross_room_identical,
         "contract_spam_msgs": f.contract_spam_msgs, "injection_msgs": f.injection_msgs, "opaque_ratio": round(f.opaque_ratio, 2),
         "days_since_first_seen": round(f.days_since_first_seen, 2),
+        "llm": {"summary": f.summary, "category": f.category, "signal": f.llm_signal, "flags": f.llm_flags},
         "score": r.as_dict(), "sample": f.sample,
     }
     return json.dumps(d, indent=2, ensure_ascii=False)
@@ -148,7 +150,8 @@ def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
     return formatter.note_line(
         f"agentscout agent {f.fp} did={f.did} name={name} score={r.score} conf={r.confidence} msgs={f.signed_msgs} "
         f"days={f.days_seen} rooms={len(f.rooms)} replies={f.replies_raw} owned={len(f.owned_rooms)} artifacts={f.artifacts_ok} "
-        f"first_seen={f.first_seen[:19]}Z asof={now.strftime('%Y-%m-%dT%H:%MZ')} observed-behaviour-not-endorsement")
+        f"first_seen={f.first_seen[:19]}Z category={f.category or 'unknown'} summary={formatter.sanitize_label(f.summary, 160) if f.summary else '-'} "
+        f"asof={now.strftime('%Y-%m-%dT%H:%MZ')} observed-behaviour-not-endorsement")
 
 
 # ---- Telegram (multi-line, plain text) --------------------------------------------------------------
@@ -174,6 +177,8 @@ def telegram_who(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
         f"{f.signed_msgs} signed msgs · {f.days_seen} days · rooms: {', '.join(f.rooms[:8])}{'…' if len(f.rooms) > 8 else ''}",
         f"replies from others {f.replies_raw} · owned rooms {len(f.owned_rooms)} · resolving artifacts {f.artifacts_ok}/{f.artifacts_total}",
     ]
+    if f.summary:
+        lines.append(f"appears to: {formatter.sanitize_label(f.summary, 160)} [{f.category}, model signal {f.llm_signal}]")
     if r.penalties:
         lines.append("penalties: " + ", ".join(f"{k} -{v}" for k, v in r.penalties.items()))
     if f.sample:
