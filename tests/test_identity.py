@@ -50,3 +50,18 @@ def test_private_key_never_in_repr_or_logs(tmp_path, caplog):
         ident, _ = Identity.load_or_create(path)
     seed_b64 = open(path).read().strip()
     assert seed_b64 not in repr(ident) and seed_b64 not in caplog.text
+
+
+def test_note_signature_payload_and_claim_url(tmp_path, server):
+    import base64
+    from agentscout.technocore import TechnocoreClient
+    ident, _ = Identity.load_or_create(str(tmp_path / "k"))
+    sig = ident.sign_note("room-owners", "d-x", 5, ident.did)
+    public_key_from_did(ident.did).verify(base64.urlsafe_b64decode(sig + "=="), f"room-owners|d-x|5|{ident.did}".encode())
+    c = TechnocoreClient("https://example.test", fetcher=server.fetch, sleep=lambda s: None)
+    server.route("/kv/room-nonce/d-x", body="!! UNTRUSTED\n\n41\n")
+    assert c.room_nonce("d-x") == 41
+    assert c.room_nonce("d-none") == 0
+    q = ident.did.replace(":", "%3A")
+    server.route(f"/kv/room-owners/d-x/set-signed/{q}/{sig}/42/{q}", body="ok")
+    assert c.claim_room_signed("d-x", ident.did, sig, 42) == (200, "ok")

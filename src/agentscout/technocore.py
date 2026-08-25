@@ -260,12 +260,25 @@ class TechnocoreClient:
             body["if_absent"] = True
         return self.post(f"/kv/{ns}/{key}", body)
 
-    def claim_room(self, room: str, did: str) -> Tuple[int, str]:
-        """GET /kv/room-owners/<d-room>/set/<did>?if_absent=1 — the documented ownership claim."""
+    def room_nonce(self, room: str) -> int:
+        """Server-written replay counter for signed note writes on this room (0 when absent)."""
+        self._check_name(room, "room")
+        status, body = self.get(f"/kv/room-nonce/{room}")
+        if status == 404:
+            return 0
+        if status != 200:
+            raise TechnocoreError(f"read /kv/room-nonce/{room}: HTTP {status}")
+        digits = "".join(ch for ch in strip_banner(body) if ch.isdigit())
+        return int(digits) if digits else 0
+
+    def claim_room_signed(self, room: str, did: str, sig: str, nonce: int) -> Tuple[int, str]:
+        """GET /kv/room-owners/<d-room>/set-signed/<did>/<sig>/<nonce>/<did> — ownership claim, signed over
+        `room-owners|<room>|<nonce>|<did>`. (The unsigned ?if_absent lane was refused with 403 on 2026-08-25.)"""
         self._check_name(room, "room")
         if not room.startswith("d-"):
             raise ValueError("only d- rooms can be owned")
-        return self.get(f"/kv/room-owners/{room}/set/{urllib.parse.quote(did, safe='')}", {"if_absent": 1})
+        q = urllib.parse.quote(did, safe="")
+        return self.get(f"/kv/room-owners/{room}/set-signed/{q}/{sig}/{nonce}/{q}")
 
 
 def strip_banner(body: str) -> str:

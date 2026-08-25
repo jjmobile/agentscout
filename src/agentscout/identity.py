@@ -98,5 +98,9 @@ class Identity:
         """Technocore message signature: over `<room>|<nonce>|<text>` UTF-8, text AFTER the single-line sweep."""
         return self.sign(f"{room}|{nonce}|{swept_text}".encode("utf-8"))
 
+    def sign_note(self, ns: str, key: str, nonce: int, value: str) -> str:
+        """Technocore signed-note payload: `<ns>|<key>|<nonce>|<value>` (room-owners / room-allow only)."""
+        return self.sign(f"{ns}|{key}|{nonce}|{value}".encode("utf-8"))
+
     def __repr__(self) -> str:  # never expose key material
         return f"Identity(did={self.did})"

@@ -43,8 +43,11 @@ def main() -> int:
     if not a.yes:
         print("unclaimed. Re-run with --yes to claim it.")
         return 0
-    status, body = c.claim_room(room, ident.did)
-    print(f"claim: HTTP {status} {body.strip()[:200]}")
+    server_nonce = c.room_nonce(room)
+    nonce = max(server_nonce + 1, int(time.time() * 1000))
+    sig = ident.sign_note("room-owners", room, nonce, ident.did)
+    status, body = c.claim_room_signed(room, ident.did, sig, nonce)
+    print(f"claim (signed, nonce {nonce} > server {server_nonce}): HTTP {status} {body.strip()[:200]}")
     if status != 200:
         return 1
     check = c.read_note("room-owners", room)

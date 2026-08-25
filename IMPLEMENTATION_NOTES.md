@@ -62,3 +62,9 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
 25. **Telegram**: outbound `sendMessage` only; token from a Docker secret file; WARNING+ log records are forwarded
     through a logging handler with an hourly cap; the token never appears in logs (tested).
 26. Technocore client retry lines were downgraded to INFO so transient 500s do not flood Telegram.
+27. **Protocol drift found on go-live (2026-08-25 02:18Z)**: the documented unsigned ownership claim
+    `GET /kv/room-owners/d-<room>/set/<did>?if_absent=1` now returns 403 — the server requires the signed lane
+    `/kv/room-owners/<room>/set-signed/<did>/<sig>/<nonce>/<did>` (signature over `room-owners|<room>|<nonce>|<did>`,
+    nonce greater than the server-written `/kv/room-nonce/<room>`, which is absent (404 → 0) for a fresh room).
+    `scripts/claim_room.py` now does exactly that. Ownership verification at startup caught the failed claim and
+    kept publishing disabled.
