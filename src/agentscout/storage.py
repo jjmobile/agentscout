@@ -196,6 +196,11 @@ class Storage:
         return self.conn.execute(
             "SELECT * FROM outbox WHERE state IN ('PENDING','FAILED_RETRYABLE') ORDER BY id LIMIT ?", (limit,)).fetchall()
 
+    def outbox_stuck_posting(self, older_than: str) -> List[sqlite3.Row]:
+        """Rows left in POSTING by a crash/restart mid-request: the write may or may not have landed."""
+        return self.conn.execute(
+            "SELECT * FROM outbox WHERE state='POSTING' AND updated_at < ? ORDER BY id", (older_than,)).fetchall()
+
     def outbox_update(self, row_id: int, state: str, now: str, nonce: Optional[int] = None, posted_seq: Optional[int] = None,
                       error: Optional[str] = None, bump_attempts: bool = False) -> None:
         self.conn.execute(

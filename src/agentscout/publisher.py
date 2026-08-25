@@ -85,6 +85,9 @@ class Publisher:
     def flush_outbox(self, now: datetime) -> None:
         if not self.live or not self.owner_verified:
             return
+        for row in self.db.outbox_stuck_posting(iso(now - timedelta(minutes=3))):
+            log.warning("outbox %d (%s) was left in POSTING (restart mid-request?); checking whether it landed", row["id"], row["kind"])
+            self._after_uncertain(row, now, "interrupted")
         for row in self.db.outbox_pending():
             if row["attempts"] >= MAX_POST_ATTEMPTS:
                 self.db.outbox_update(row["id"], "FAILED_FINAL", iso(now), error="max attempts")

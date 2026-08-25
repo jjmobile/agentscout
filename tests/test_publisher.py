@@ -147,3 +147,22 @@ def test_posted_seq_from_text_reply_or_readback(server, client, storage, tmp_pat
     storage.enqueue(s.feed_room, "digest", marker, marker, T(0))
     assert pub.post_signed_line(storage.outbox_pending()[0], NOW) == "POSTED"
     assert storage.outbox_has(s.feed_room, marker)["posted_seq"] == 4
+
+
+def test_stuck_posting_row_is_checked_not_reposted(server, client, storage, tmp_path):
+    s, ident, pub = make(server, client, storage, tmp_path)
+    marker = "AGENTSCOUT DIGEST 2026-08-24"
+    storage.enqueue(s.feed_room, "digest", marker, marker, T(-30))
+    row = storage.outbox_pending()[0]
+    storage.outbox_update(row["id"], "POSTING", T(-30), nonce=5, bump_attempts=True)   # crashed here yesterday
+    server.route(f"/r/{s.feed_room}?format=json&limit=50", body=room_json(s.feed_room, [msg(3, T(-29), ident.did, marker, 5)]))
+    cap = PostCapture(server, [])
+    client._fetch = cap
+    pub.flush_outbox(NOW)
+    assert storage.outbox_has(s.feed_room, marker)["state"] == "POSTED" and cap.bodies == []
+    # and when it did NOT land, it goes back to retryable
+    storage.enqueue(s.feed_room, "digest", "m2", "m2", T(-30))
+    r2 = storage.outbox_has(s.feed_room, "m2")
+    storage.outbox_update(r2["id"], "POSTING", T(-30), bump_attempts=True)
+    pub.flush_outbox(NOW)
+    assert storage.outbox_has(s.feed_room, "m2")["state"] in ("FAILED_RETRYABLE", "POSTED")

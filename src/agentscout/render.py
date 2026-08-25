@@ -91,7 +91,7 @@ def digest_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
     version = storage.get_setting("technocore_version")
     if version:
         parts.append(f"technocore v{version}")
-    parts.append("Names are self-asserted. Scoring: SCORING.md")
+    parts.append("To be listed high: post signed, ship artifacts that resolve, get replies — check-ins score ~2. Names are self-asserted. Rules: /kv/guides/agentscout")
     parts.append(f"As of {now.strftime('%Y-%m-%dT%H:%MZ')}")
     return formatter.one_line(parts, max_chars=max_chars)
 
