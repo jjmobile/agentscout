@@ -196,3 +196,17 @@ def test_failed_notes_are_retried_next_cycle(server, client, storage, tmp_path):
     pub._pending_notes[("agentscout", "top")] = "v1"
     assert pub.flush_pending_notes(NOW) == 0 and ("agentscout", "top") in pub._pending_notes
     assert pub.flush_pending_notes(NOW) == 1 and not pub._pending_notes
+
+
+def test_notes_catchup_after_digest_posted_without_notes(server, client, storage, tmp_path):
+    s, ident, pub = make(server, client, storage, tmp_path)
+    assert pub.notes_catchup_due(NOW) is False                      # no digest yet
+    storage.enqueue(s.feed_room, "digest", "AGENTSCOUT DIGEST 2026-08-25", "x", T(-60))
+    row = storage.outbox_has(s.feed_room, "AGENTSCOUT DIGEST 2026-08-25")
+    storage.outbox_update(row["id"], "POSTED", T(-59), posted_seq=2)
+    assert pub.notes_catchup_due(NOW) is True                       # posted, notes never written
+    storage.set_published_note("agentscout", "digest-latest", "v", T(-30))
+    storage.set_published_note("agentscout", "top", "v", T(-30))
+    assert pub.notes_catchup_due(NOW) is False                      # notes newer than the digest
+    storage.set_published_note("agentscout", "top", "old", T(-120))
+    assert pub.notes_catchup_due(NOW) is True                       # one list stale → refresh

@@ -76,7 +76,7 @@ class Runner:
             self.ing.check_artifacts(now)
         scored = self.maybe_snapshot(now)
         if self.publisher is not None:
-            if scored is None and self._digest_due(now):
+            if scored is None and (self._digest_due(now) or self.publisher.notes_catchup_due(now)):
                 scored = render.score_all(self.db, now)
             self.publisher.tick(now, scored)
         if self.summarizer is not None and self.summarizer.enabled:

@@ -54,6 +54,18 @@ class Publisher:
         return self.owner_verified
 
     # ---- per-cycle -------------------------------------------------------------------------
+    def notes_catchup_due(self, now: datetime) -> bool:
+        """True when today's digest is posted but the kv lists were not (fully) written after it — e.g. the
+        writes timed out, or the process restarted with notes still pending in memory."""
+        if not self.live:
+            return False
+        row = self.db.outbox_has(self.s.feed_room, f"AGENTSCOUT DIGEST {now.strftime('%Y-%m-%d')}")
+        if row is None or row["state"] != "POSTED":
+            return False
+        latest = self.db.published_note(self.s.kv_ns, "digest-latest")
+        top = self.db.published_note(self.s.kv_ns, "top")
+        return latest is None or top is None or latest["written_at"] < row["created_at"] or top["written_at"] < row["created_at"]
+
     def tick(self, now: datetime, scored: Optional[dict]) -> None:
         day = now.strftime("%Y-%m-%d")
         if scored is not None and now.hour >= self.s.digest_utc_hour:
@@ -61,6 +73,9 @@ class Publisher:
             if not self.db.outbox_has(self.s.feed_room, marker):
                 text = render.digest_line(scored, self.db, now)
                 self._enqueue("digest", marker, text, now)
+                self.refresh_notes(scored, now)
+            elif not self._pending_notes and self.notes_catchup_due(now):
+                log.info("kv notes are older than today's digest; refreshing")
                 self.refresh_notes(scored, now)
             if now.weekday() == 0:
                 wmarker = f"AGENTSCOUT WEEKLY {day}"
