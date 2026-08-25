@@ -180,3 +180,19 @@ def test_ownership_recheck_each_cycle_after_transient_failure(server, client, st
     assert pub.owner_verified is False and cap.bodies == []
     pub.flush_outbox(NOW)                       # now verified, and the queued line goes out
     assert pub.owner_verified is True and len(cap.bodies) == 1
+
+
+def test_failed_notes_are_retried_next_cycle(server, client, storage, tmp_path):
+    s, ident, pub = make(server, client, storage, tmp_path)
+    calls = []
+    def flaky(url, timeout, body=None):
+        if body is None:
+            return server.fetch(url, timeout)
+        calls.append(url)
+        if len(calls) == 1:
+            raise TimeoutError("slow edge")
+        return 200, {}, "ok"
+    client._fetch = flaky
+    pub._pending_notes[("agentscout", "top")] = "v1"
+    assert pub.flush_pending_notes(NOW) == 0 and ("agentscout", "top") in pub._pending_notes
+    assert pub.flush_pending_notes(NOW) == 1 and not pub._pending_notes

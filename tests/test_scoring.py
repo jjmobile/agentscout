@@ -168,3 +168,12 @@ def test_fleet_caps_limit_endorsement_spray(storage):
 def test_abbreviated_contract_addresses_count_as_contract_spam(storage):
     _put(storage, "builders", 1, -10, DID_A, "[LIVE MINT ACTIVE] morphora on INK (0x585c...fa64) | Stage: Public Live | Supply: 2311")
     assert compute_facts(storage, NOW)[DID_A].contract_spam_msgs == 1
+
+
+def test_own_did_is_never_listed(storage):
+    storage.set_setting("own_did", DID_A)
+    storage.insert_messages("lobby", [(1, T(-30), DID_A, DID_A, True, "AGENTSCOUT DIGEST ...", "h1"),
+                                      (2, T(-20), DID_B, DID_B, True, "hello from B", "h2")], T(0))
+    scored = render.score_all(storage, NOW)
+    assert DID_A not in scored and DID_B in scored
+    assert [f.did for f, _r in render.newest(scored)] == [DID_B]

@@ -70,7 +70,7 @@ class TelegramNotifier:
 import re as _re
 from collections import Counter
 
-_TRANSIENT_RE = _re.compile(r"HTTP 5\d\d|sequence gap|429|connection error|unreachable|Internal Server Error", _re.IGNORECASE)
+_TRANSIENT_RE = _re.compile(r"HTTP 5\d\d|sequence gap|429|connection error|unreachable|Internal Server Error|TimeoutError|URLError", _re.IGNORECASE)
 
 
 class OpsCounter:

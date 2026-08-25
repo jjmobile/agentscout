@@ -236,7 +236,7 @@ class TechnocoreClient:
             self.budget.acquire()
             self.writes += 1
             try:
-                status, headers, text = self._fetch(url, self.timeout, data)
+                status, headers, text = self._fetch(url, max(self.timeout, 30), data)   # writes: allow 30 s
             except (urllib.error.URLError, OSError, TimeoutError) as exc:
                 raise TechnocoreError(f"POST {path}: {exc.__class__.__name__}") from exc
             if status == 429 and attempt < self.max_attempts:

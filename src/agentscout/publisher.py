@@ -9,7 +9,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 from . import formatter, render
 from .config import Settings
@@ -35,6 +35,7 @@ class Publisher:
         self.notify = notify
         self.live = (not settings.dry_run) and settings.publish_enabled
         self.owner_verified = False
+        self._pending_notes: Dict[Tuple[str, str], str] = {}   # (ns, key) -> value still to be written
 
     # ---- startup -------------------------------------------------------------------------
     def verify_ownership(self) -> bool:
@@ -66,6 +67,7 @@ class Publisher:
                 if not self.db.outbox_has(self.s.feed_room, wmarker):
                     self._enqueue("weekly", wmarker, render.weekly_line(scored, self.db, now), now)
         self.flush_outbox(now)
+        self.flush_pending_notes(now)
         self.keepalive_did_note(now)
 
     def _enqueue(self, kind: str, marker: str, text: str, now: datetime) -> None:
@@ -188,7 +190,22 @@ class Publisher:
         for f, r in render.top(scored, self.s.kv_top_n):
             notes[f"agent-{f.fp}"] = render.agent_note(f, r, now)
         for key, value in notes.items():
-            self.write_note_cas(ns, key, value, now)
+            self._pending_notes[(ns, key)] = value       # newest value wins; written by flush_pending_notes
+        self.flush_pending_notes(now)
+
+    def flush_pending_notes(self, now: datetime, max_per_cycle: int = 12) -> int:
+        """Write queued notes, a few per cycle, until each succeeds. Failures (timeouts, 5xx) stay queued."""
+        if not self.live or not self._pending_notes:
+            return 0
+        done = 0
+        for (ns, key) in list(self._pending_notes)[:max_per_cycle]:
+            value = self._pending_notes[(ns, key)]
+            if self.write_note_cas(ns, key, value, now):
+                self._pending_notes.pop((ns, key), None)
+                done += 1
+        if done or self._pending_notes:
+            log.info("kv notes: %d written, %d still pending", done, len(self._pending_notes))
+        return done
 
     def write_note_cas(self, ns: str, key: str, value: str, now: datetime) -> bool:
         """Write our value; detect and log tampering (someone changed a note we own); our value wins."""
@@ -202,7 +219,7 @@ class Publisher:
             try:
                 status, body = self.c.write_note(ns, key, value, if_value=if_value, if_absent=if_absent)
             except TechnocoreError as exc:
-                log.warning("write /kv/%s/%s failed: %s", ns, key, exc)
+                log.info("write /kv/%s/%s failed (%s); will retry", ns, key, exc)
                 return False
             if status == 200:
                 self.db.set_published_note(ns, key, value, iso(now), tampered=tampered)

@@ -14,10 +14,12 @@ Scored = Dict[str, Tuple[AgentFacts, ScoreResult]]
 
 
 def score_all(storage: Storage, now: datetime) -> Scored:
-    """Two passes: preliminary scores (no dampening) feed the sock-puppet dampening of replies."""
+    """Two passes: preliminary scores (no dampening) feed the sock-puppet dampening of replies.
+    AgentScout's own DID is scored (it is a signed agent like any other) but never listed or ranked."""
     prelim = {did: score(f).score for did, f in compute_facts(storage, now).items()}
     facts = compute_facts(storage, now, prelim_scores=prelim)
-    return {did: (f, score(f)) for did, f in facts.items()}
+    own = storage.get_setting("own_did")
+    return {did: (f, score(f)) for did, f in facts.items() if did != own}
 
 
 def _fp8(f: AgentFacts) -> str:
