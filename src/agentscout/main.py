@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from . import __version__, render
 from .config import ConfigError, Settings
+from .identity import Identity
 from .ingest import Ingestor
 from .logging_config import configure_logging
 from .storage import Storage
@@ -31,6 +32,9 @@ class Runner:
     def startup(self) -> None:
         log.info("agentscout %s starting: DRY_RUN=%s llm=%s replies=%s db=%s rooms=%s",
                  __version__, self.s.dry_run, self.s.llm_enabled, self.s.replies_enabled, self.s.db_path, ",".join(self.s.watch_rooms))
+        ident, created = Identity.load_or_create(self.s.identity_key_path)
+        log.info("identity: did=%s fp=%s (%s)", ident.did, ident.fp, "CREATED — back up %s now" % self.s.identity_key_path if created else "loaded")
+        self.db.set_setting("own_did", ident.did)
         self.ing.discover_limits()
         now = self._now()
         if not self.db.get_setting("observation_started_at"):

@@ -48,6 +48,17 @@ It is isolated from every other stack on the host.
 > **Warning:** `docker compose down -v` deletes the volume and therefore the census database. Prefer
 > `docker compose stop` / `down` (without `-v`).
 
+## Identity (DID)
+AgentScout has a persistent Ed25519 identity, created on first start and stored **only** in the
+`/data` volume as `identity.key` (mode 600). Its public `did:key:z6Mk…` is logged at startup and
+shown by:
+```bash
+docker compose exec agentscout python /app/scripts/show_did.py
+scripts/backup_identity.sh ~/agentscout-identity.key.bak     # do this once; a lost key = a lost identity
+```
+The key is never printed, never committed, never regenerated on rebuild. In Milestone B this DID
+signs every published line; anyone can run this code, only this DID is the official instance.
+
 ## Configuration
 All settings are non-secret environment variables; see `.env.example`. Notable:
 - `SCOUT_WATCH_ROOMS` — rooms polled every cycle. New public rooms announced on `/r/events` are all
@@ -68,15 +79,16 @@ The same renderer will be used when Milestone B posts this to the owned feed roo
 
 ## Security model (Milestone A)
 - Outbound: only `GET` to the configured `TECHNOCORE_BASE_URL` (validated: bare https host).
-- No secrets are needed in this milestone. The `secrets/` directory is git-ignored for later milestones.
+- The only secret is the identity key in the `/data` volume (never logged). `secrets/` is git-ignored for later milestones.
 - Every byte read from Technocore is treated as data; nothing read is ever executed, followed or
   interpreted as an instruction. The formatter sweeps invisible/bidi characters from anything it renders.
 - Rate limits: honours `429` bodies/`Retry-After`; bounded retries on `5xx`.
 
 ## Layout
 ```
-src/agentscout/  config.py technocore.py storage.py ingest.py census.py scoring.py formatter.py render.py main.py
+src/agentscout/  config.py technocore.py identity.py storage.py ingest.py census.py scoring.py formatter.py render.py main.py
 scripts/report.py      local read-only report
+scripts/show_did.py    print the public DID;  scripts/backup_identity.sh  copy the key out of the volume
 tests/                 pytest, no network
 ```
 

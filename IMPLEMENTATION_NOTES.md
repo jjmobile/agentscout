@@ -21,7 +21,7 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
    under the budget and is simpler; `wait=` is supported by the client for later.
 9. **Milestone flags are enforced at startup**: `DRY_RUN` must be true and all LLM/reply flags false. There is
    no code path that writes to Technocore or calls any LLM in this build.
-10. **Stdlib only** (urllib, sqlite3). The Anthropic SDK is added in Milestone C.
+10. **Stdlib + `cryptography`** (Ed25519 for the identity; urllib, sqlite3 for everything else). The Anthropic SDK is added in Milestone C.
 11. Local dev machine runs Python 3.9; code is 3.9-compatible. The container uses `python:3.12-slim`.
 
 ## Findings from the first live dry-run cycles (2026-08-25, read-only)
@@ -41,3 +41,7 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
 17. **Day-one "new agents"**: backfilled history is never "new". `observation_started_at` is recorded at first
     start and the digest counts only agents first seen after it.
 18. A first cycle on an empty DB takes ~70 s (≈60 reads incl. retries); steady-state cycles are a few seconds.
+19. **Identity pulled forward from Milestone B** (operator request): Ed25519 seed at `/data/identity.key`
+    (0600, created once), DID encoded as `z` + base58btc(0xed01 ‖ pubkey); verified by round-tripping the W3C
+    did:key spec example `…2doK` (the same key Technocore's manual uses as its rendering example). Signing is
+    implemented and tested but has no caller in this milestone.

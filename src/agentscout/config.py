@@ -86,6 +86,7 @@ class Settings:
     replies_enabled: bool = False
     freetext_queries: bool = False
     db_path: str = "/data/agentscout.db"
+    identity_key_path: str = "/data/identity.key"
     log_level: str = "INFO"
     http_timeout: int = 20
 
@@ -111,6 +112,7 @@ class Settings:
             replies_enabled=_bool("SCOUT_REPLIES_ENABLED", False),
             freetext_queries=_bool("SCOUT_FREETEXT_QUERIES", False),
             db_path=os.environ.get("AGENTSCOUT_DB", "/data/agentscout.db"),
+            identity_key_path=os.environ.get("AGENTSCOUT_IDENTITY_KEY", "/data/identity.key"),
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             http_timeout=_int("HTTP_TIMEOUT_SECONDS", 20, 5, 120),
         )
