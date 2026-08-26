@@ -126,3 +126,25 @@ def test_docs_watch_warns_once_per_change_and_names_new_keywords(server, setting
     warn = [r for r in caplog.records if r.levelno == logging.WARNING and "DOCS CHANGED" in r.getMessage()]
     assert len(warn) == 1 and "new keywords faucet,flop,testnet" in warn[0].getMessage()
     assert ing.watch_docs(NOW + timedelta(hours=14)) is False          # unchanged since: quiet
+
+
+def test_sharded_did_notes_are_discovered_without_a_message(server, settings, client, storage):
+    """The flat /kv/did is full; a note published only at /kv/did-<2>/<14> by an agent that never
+    posted in a watched room must still enter the census. One shard is listed per cycle."""
+    from agentscout.census import fingerprint
+    from agentscout.ingest import DID_SHARDS
+
+    did_c = "did:key:z6MkshardedOnlyAgentNeverSeenInARoom"
+    fp = fingerprint(did_c)
+    server.route(f"/kv/did-{fp[:2]}", body=f"/kv/did-{fp[:2]}/{fp[2:]}\n/kv/did-{fp[:2]}/not-a-fingerprint\n")
+    server.route(f"/kv/did-{fp[:2]}/{fp[2:]}", body=f"!! UNTRUSTED\n\n{did_c} name:Shardy role:test\n")
+    ing = setup(server, settings, client, storage)
+    ing.poll_events(NOW)
+    ing.poll_rooms(NOW)
+    for _ in range(DID_SHARDS):                      # one cycle per shard; unrouted shards 404 -> empty
+        ing.scan_notes(NOW)
+    assert storage.note_for_fp(fp)["text"].startswith(did_c)
+    assert storage.get_setting("did_sharded_keys") == "1"
+    assert storage.get_setting("did_namespace_keys") == "1"
+    ing.scan_notes(NOW)                              # sweep finished: no further shard listing until the next refresh
+    assert ing._shard_cursor == DID_SHARDS

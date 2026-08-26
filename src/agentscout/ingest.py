@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .census import extract_kv_refs, fingerprint, is_signed, parse_note, text_hash, parse_ts
 from .config import Settings
@@ -20,6 +20,9 @@ def iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+DID_SHARDS = 256    # /kv/did-<first 2 hex>/<remaining 14>: 00..ff
+
+
 class Ingestor:
     def __init__(self, settings: Settings, client: TechnocoreClient, storage: Storage):
         self.s = settings
@@ -27,6 +30,10 @@ class Ingestor:
         self.db = storage
         self._note_keys: List[str] = []
         self._note_keys_fetched_at: Optional[datetime] = None
+        # sharded DID notes (/kv/did-<2>/<14>): one shard listed per cycle, so a full sweep
+        # costs 256 reads spread over ~an hour instead of a burst that stalls room polling
+        self._shard_keys: Dict[str, List[str]] = {}    # shard -> fingerprints seen in the last sweep
+        self._shard_cursor: int = DID_SHARDS           # next shard to list; == DID_SHARDS when idle
         self._owner_rooms: List[str] = []
 
     # ---- limits -----------------------------------------------------------------------
@@ -213,8 +220,11 @@ class Ingestor:
             self.db.set_setting("did_namespace_keys", str(len(keys)))
             log.info("/kv/did lists %d keys (%d fingerprint-shaped)", len(keys), len(fps))
             self._list_owner_rooms()
+            self._shard_cursor = 0                     # the flat namespace is full: new notes live in the shards
+        self._list_next_shard()
         # agents observed in messages may lack a note key in a (capped) listing: try them first anyway
-        candidates = list(dict.fromkeys([r["fp"] for r in self.db.agents()] + self._note_keys))
+        sharded = [fp for fps in self._shard_keys.values() for fp in fps]
+        candidates = list(dict.fromkeys([r["fp"] for r in self.db.agents()] + self._note_keys + sharded))
         stale_before = iso(now - timedelta(days=self.s.note_refresh_days))
         queue = self.db.note_fetch_queue(candidates, stale_before, self.s.notes_per_cycle)
         fetched = 0
@@ -234,6 +244,22 @@ class Ingestor:
             log.info("DID notes fetched: %d (queue had %d)", fetched, len(queue))
         fetched += self._scan_owners(now)
         return fetched
+
+    def _list_next_shard(self) -> None:
+        """List one /kv/did-<shard> namespace per call; a failed shard keeps last sweep's keys."""
+        if self._shard_cursor >= DID_SHARDS:
+            return
+        shard = f"{self._shard_cursor:02x}"
+        self._shard_cursor += 1
+        try:
+            keys = self.c.list_note_keys(f"did-{shard}")
+            self._shard_keys[shard] = [shard + k for k in keys if len(k) == 14 and all(ch in "0123456789abcdef" for ch in k)]
+        except TechnocoreError as exc:
+            log.warning("list /kv/did-%s failed: %s", shard, exc)
+        if self._shard_cursor == DID_SHARDS:
+            total = sum(len(v) for v in self._shard_keys.values())
+            self.db.set_setting("did_sharded_keys", str(total))
+            log.info("/kv/did-00..ff list %d sharded fingerprints", total)
 
     def _list_owner_rooms(self) -> None:
         try:
