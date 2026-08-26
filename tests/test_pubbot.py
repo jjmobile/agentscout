@@ -46,6 +46,7 @@ def seeded(tmp_path):
     path = str(tmp_path / "t.db")
     db = Storage(path)
     db.insert_messages("lobby", [(1, T(-30), DID_A, DID_A, True, "hello world here", "h1"), (2, T(-20), DID_A, DID_A, True, "second message here", "h2")], T(0))
+    db.insert_messages("builders", [(1, T(-10), DID_A, DID_A, True, "third message, elsewhere", "h3")], T(0))
     db.close()
     return path
 
@@ -100,3 +101,20 @@ def test_run_acks_offset_and_stops(tmp_path):
     assert db.get_setting("telegram_public_offset") == "42"
     assert "setMyCommands" in tg.calls and tg.sent[0]["text"].startswith("AgentScout")
     assert "TOK" not in json.dumps(tg.sent)
+
+
+def test_offset_is_persisted_before_a_command_is_answered(tmp_path):
+    """A crash while answering must not replay the same command on every restart."""
+    path = seeded(tmp_path)
+    tg = FakeTelegram([upd(41, 100, "/top")])
+    bot = PublicBot("TOK", path, http=tg, now=lambda: NOW)
+
+    def boom(db, u):
+        bot.stop()
+        raise MemoryError("simulated OOM while scoring")
+
+    bot._handle = boom
+    bot._run()
+    db = Storage(path)
+    assert db.get_setting("telegram_public_offset") == "42"
+    assert tg.sent == []

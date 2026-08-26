@@ -53,6 +53,17 @@ def test_signature_covers_room_nonce_swept_text(server, client, storage, tmp_pat
     assert done["state"] == "POSTED" and done["posted_seq"] == 7
 
 
+def test_room_cap_full_parks_the_post_instead_of_burning_attempts(server, client, storage, tmp_path):
+    s, ident, pub = make(server, client, storage, tmp_path)
+    cap = PostCapture(server, [(400, {}, "400 room limit reached (10240 is the cap, and this would be a new one). Existing rooms still accept writes")])
+    client._fetch = cap
+    storage.enqueue("agentscout", "ask-open", "AGENTSCOUT ASK OPENED", "AGENTSCOUT ASK OPENED | hello", T(0))
+    row = storage.outbox_pending()[0]
+    assert pub.post_signed_line(row, NOW) == "WAITING_ROOM"
+    assert storage.outbox_has("agentscout", "AGENTSCOUT ASK OPENED")["state"] == "WAITING_ROOM"
+    assert storage.outbox_pending() == []
+
+
 def test_nonce_strictly_increases_even_if_clock_goes_back(storage):
     n1 = storage.next_nonce("d-x", 1_000_000)
     n2 = storage.next_nonce("d-x", 999_000)

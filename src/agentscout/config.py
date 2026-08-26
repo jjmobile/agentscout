@@ -146,6 +146,16 @@ class Settings:
     log_level: str = "INFO"
     http_timeout: int = 12
     cycle_budget_seconds: int = 120
+    # Census scale: score only the last N days (messages older than N+1 days are pruned); re-score at most every M minutes
+    score_window_days: int = 7
+    score_interval_minutes: int = 30
+    # Milestone D — agents ask "SCOUT: …" in an open room; signed one-line answers via the outbox, no LLM
+    ask_room: str = "agentscout"                       # the dedicated room we try to open (server may refuse new rooms)
+    ask_rooms: List[str] = field(default_factory=lambda: ["agentscout", "builders", "meta", "general", "infra", "ai", "alpha", "introductions"])
+    max_replies_per_did_per_hour: int = 3
+    max_replies_per_did_per_day: int = 10
+    global_max_replies_per_hour: int = 20
+    global_max_replies_per_day: int = 100
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -194,10 +204,20 @@ class Settings:
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             http_timeout=_int("HTTP_TIMEOUT_SECONDS", 12, 5, 120),
             cycle_budget_seconds=_int("SCOUT_CYCLE_BUDGET_SECONDS", 120, 20, 3600),
+            score_window_days=_int("SCOUT_SCORE_WINDOW_DAYS", 7, 1, 30),
+            score_interval_minutes=_int("SCOUT_SCORE_INTERVAL_MINUTES", 30, 1, 1440),
+            ask_room=_room("SCOUT_REQUEST_ROOM", "agentscout"),
+            ask_rooms=_rooms(os.environ.get("SCOUT_REQUEST_ROOMS", ",".join(cls().ask_rooms))),
+            max_replies_per_did_per_hour=_int("MAX_REPLIES_PER_DID_PER_HOUR", 3, 1, 100),
+            max_replies_per_did_per_day=_int("MAX_REPLIES_PER_DID_PER_DAY", 10, 1, 1000),
+            global_max_replies_per_hour=_int("GLOBAL_MAX_REPLIES_PER_HOUR", 20, 1, 1000),
+            global_max_replies_per_day=_int("GLOBAL_MAX_REPLIES_PER_DAY", 100, 1, 10000),
         )
-        # Milestones D–E are not built: refuse to start with their flags on.
-        if s.replies_enabled or s.freetext_queries:
-            raise ConfigError("SCOUT_REPLIES_ENABLED / SCOUT_FREETEXT_QUERIES are not implemented in this build.")
+        # Milestone E is not built: refuse to start with its flag on.
+        if s.freetext_queries:
+            raise ConfigError("SCOUT_FREETEXT_QUERIES is not implemented in this build.")
+        if s.replies_enabled and not (s.publish_enabled and not s.dry_run):
+            raise ConfigError("SCOUT_REPLIES_ENABLED=true requires SCOUT_PUBLISH_ENABLED=true and DRY_RUN=false.")
         if s.publish_enabled and s.dry_run:
             raise ConfigError("SCOUT_PUBLISH_ENABLED=true requires DRY_RUN=false.")
         if not s.feed_room.startswith("d-"):

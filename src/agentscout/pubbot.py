@@ -18,13 +18,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 from . import formatter, render
+from .census import DEFAULT_WINDOW_DAYS
 from .storage import Storage
 
 log = logging.getLogger("agentscout.pubbot")
 
 COMMANDS: Dict[str, str] = {
     "top": "best-scored agents (confidence >= 40), e.g. /top 5",
-    "newest": "most recently first-seen signed agents",
+    "newest": "newest agents that are actually active (3+ msgs in 2+ rooms)",
     "rising": "largest 7-day score gains",
     "who": "details for one agent — use the 8-char id from a list, e.g. /who b6711fbd",
     "digest": "today's digest line",
@@ -38,7 +39,7 @@ SHORT_DESCRIPTION = "Scoreboard of AI agents on technocore.chat, ranked by what 
 DESCRIPTION = ABOUT + " Commands: /top /newest /rising /who <fp> /digest /stats /help. Observed behaviour, no endorsements."
 _CMD_RE = re.compile(r"^/([A-Za-z]+)(?:@[A-Za-z0-9_]+)?(?:\s+(.{0,80}))?$")
 _ARG_RE = re.compile(r"^[A-Za-z0-9:._-]{1,80}$")
-SCORE_CACHE_SECONDS = 60
+SCORE_CACHE_SECONDS = 1800   # the main loop shares its scoring (see Runner.scored); own scoring only as a fallback
 MAX_REPLY = 3500
 
 
@@ -55,9 +56,10 @@ def _http(url: str, body: Optional[bytes], timeout: int) -> Tuple[int, str]:
 class PublicBot:
     def __init__(self, token: str, db_path: str, max_per_user_per_minute: int = 10,
                  http: Callable[[str, Optional[bytes], int], Tuple[int, str]] = _http,
-                 clock=time.monotonic, now=lambda: datetime.now(timezone.utc)):
+                 clock=time.monotonic, now=lambda: datetime.now(timezone.utc), window_days: int = DEFAULT_WINDOW_DAYS):
         self._token = token
         self._db_path = db_path
+        self._window_days = window_days
         self._http = http
         self._clock = clock
         self._now = now
@@ -92,12 +94,13 @@ class PublicBot:
                     continue
                 for upd in updates:
                     offset = max(offset, int(upd.get("update_id", 0)) + 1)
+                    # acknowledge BEFORE answering: if answering kills the process, the same command must not
+                    # be replayed on every restart (a scoring OOM did exactly that for six hours on 2026-08-25)
+                    db.set_setting("telegram_public_offset", str(offset))
                     try:
                         self._handle(db, upd)
                     except Exception:
                         log.exception("pubbot: handling update failed")
-                if updates:
-                    db.set_setting("telegram_public_offset", str(offset))
         finally:
             db.close()
 
@@ -162,14 +165,21 @@ class PublicBot:
             self.ignored += 1
             return
         cmd, arg = parsed
+        started = self._clock()
         self._send(chat_id, self.answer(db, cmd, arg))
         self.answered += 1
+        db.bump_counter(self._now().strftime("%Y-%m-%d"), "pubbot_answered")
+        log.info("pubbot: /%s answered in %.1fs", cmd, self._clock() - started)
+
+    def share_scored(self, scored: Optional[dict]) -> None:
+        """Called from the main loop whenever it re-scores (a tuple swap: safe across threads, never mutated)."""
+        self._scored_cache = (self._clock(), scored)
 
     def _scored(self, db: Storage) -> dict:
         ts, cached = self._scored_cache
         if cached is not None and self._clock() - ts < SCORE_CACHE_SECONDS:
             return cached
-        scored = render.score_all(db, self._now())
+        scored = render.score_all(db, self._now(), self._window_days)
         self._scored_cache = (self._clock(), scored)
         return scored
 
@@ -195,7 +205,7 @@ class PublicBot:
         if cmd == "top":
             return render.telegram_list(render.top(scored, n), "🏆 TOP (confidence ≥ 40)", now)
         if cmd == "newest":
-            return render.telegram_list(render.newest(scored, n), "🆕 NEWEST signed agents", now)
+            return render.telegram_list(render.newest(scored, n), "🆕 NEWEST active agents (3+ msgs, 2+ rooms)", now)
         if cmd == "rising":
             rows = render.rising(scored, db, now, n)
             return render.telegram_list([(f, r) for f, r, _ in rows], "📈 RISING (7-day gain)", now,

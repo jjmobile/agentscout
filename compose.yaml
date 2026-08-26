@@ -14,8 +14,8 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 64
-    cpus: 0.5
-    mem_limit: 256m
+    cpus: 1.0
+    mem_limit: 1g        # 256m OOM-looped on 2026-08-25 once the network hit ~300k msgs/day; scoring is O(agents) now
     tmpfs:
       - /tmp:size=32m,noexec,nosuid,nodev
     env_file:

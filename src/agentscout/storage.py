@@ -83,6 +83,19 @@ MIGRATIONS: List[str] = [
     );
     CREATE INDEX usage_ts ON usage_ledger(ts);
     """,
+    # v4 — windowed scoring + retention: the census reads and prunes messages by time
+    """
+    CREATE INDEX messages_ts ON messages(ts);
+    """,
+    # v5 — Milestone D: in-room requests ("SCOUT: …") + daily usage counters
+    """
+    CREATE TABLE ask_requests (
+        room TEXT NOT NULL, seq INTEGER NOT NULL, did TEXT NOT NULL, ts TEXT NOT NULL,
+        command TEXT NOT NULL, state TEXT NOT NULL, PRIMARY KEY(room, seq)
+    );
+    CREATE INDEX ask_requests_did_ts ON ask_requests(did, ts);
+    CREATE TABLE counters (day TEXT NOT NULL, key TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY(day, key));
+    """,
 ]
 
 
@@ -94,6 +107,7 @@ class Storage:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.execute("PRAGMA temp_store=MEMORY")   # GROUP BY sorters: the container is read-only with a tiny /tmp
         self._migrate()
 
     def close(self) -> None:
@@ -209,6 +223,10 @@ class Storage:
             " attempts=attempts+? WHERE id=?",
             (state, now, nonce, posted_seq, error, 1 if bump_attempts else 0, row_id))
 
+    def outbox_retry(self, row_id: int, now: str) -> None:
+        """Give a parked row a fresh set of attempts (used for the ask-room opener while the server's room cap is full)."""
+        self.conn.execute("UPDATE outbox SET state='PENDING', attempts=0, updated_at=? WHERE id=?", (now, row_id))
+
     def outbox_has(self, room: str, marker: str) -> Optional[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM outbox WHERE room=? AND marker=?", (room, marker)).fetchone()
 
@@ -263,11 +281,98 @@ class Storage:
             raise
         return inserted
 
-    def all_messages(self) -> List[sqlite3.Row]:
-        return self.conn.execute("SELECT room,seq,ts,sender,sender_did,signed,text,text_hash FROM messages ORDER BY room, seq").fetchall()
-
     def agents(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT did,fp,first_seen,last_seen FROM agents").fetchall()
+
+    def agents_seen_since(self, since: str) -> List[sqlite3.Row]:
+        return self.conn.execute("SELECT did,fp,first_seen,last_seen FROM agents WHERE last_seen>=?", (since,)).fetchall()
+
+    # ---- census aggregates (scoring window) ----------------------------------------------------
+    # Everything below streams or aggregates inside SQLite: the message table is never materialised in Python
+    # (at 300k+ messages a day that alone exceeded the container's memory).
+    _SIGNED = "signed=1 AND sender_did IS NOT NULL AND ts>=?"
+
+    def iter_agent_stats(self, since: str) -> Iterable[sqlite3.Row]:
+        """Per signed agent: n, distinct UTC days, distinct text hashes, busiest UTC hour."""
+        return self.conn.execute(
+            f"""SELECT s.did, s.n, s.days, s.hashes, h.max_per_hour FROM
+                 (SELECT sender_did AS did, COUNT(*) AS n, COUNT(DISTINCT substr(ts,1,10)) AS days,
+                         COUNT(DISTINCT text_hash) AS hashes FROM messages WHERE {self._SIGNED} GROUP BY sender_did) s
+                 JOIN (SELECT did, MAX(c) AS max_per_hour FROM
+                        (SELECT sender_did AS did, substr(ts,1,13) AS hr, COUNT(*) AS c FROM messages WHERE {self._SIGNED} GROUP BY 1,2)
+                       GROUP BY did) h ON h.did = s.did""", (since, since))
+
+    def iter_agent_rooms(self, since: str) -> Iterable[sqlite3.Row]:
+        """(did, room, n) for every signed agent/room pair in the window, ordered by did, room."""
+        return self.conn.execute(
+            f"SELECT sender_did AS did, room, COUNT(*) AS n FROM messages WHERE {self._SIGNED} GROUP BY 1,2 ORDER BY 1,2", (since,))
+
+    def cross_room_identical(self, since: str) -> Dict[str, int]:
+        """did -> number of its texts posted to >= 3 different rooms."""
+        rows = self.conn.execute(
+            f"""SELECT sender_did AS did, COUNT(*) AS n FROM
+                 (SELECT sender_did, text_hash FROM messages WHERE {self._SIGNED} GROUP BY 1,2 HAVING COUNT(DISTINCT room) >= 3)
+                GROUP BY 1""", (since,))
+        return {r["did"]: int(r["n"]) for r in rows}
+
+    def latest_texts(self, since: str) -> Dict[str, str]:
+        """did -> (start of) its most recent signed message text."""
+        rows = self.conn.execute(
+            f"SELECT sender_did AS did, substr(text,1,600) AS text, MAX(ts) FROM messages WHERE {self._SIGNED} GROUP BY sender_did", (since,))
+        return {r["did"]: r["text"] for r in rows}
+
+    def iter_signed_texts(self, since: str) -> Iterable[sqlite3.Row]:
+        return self.conn.execute(f"SELECT sender_did AS did, text FROM messages WHERE {self._SIGNED}", (since,))
+
+    def iter_signed_messages(self, since: str) -> Iterable[sqlite3.Row]:
+        """Signed messages in room order, oldest first within a room (reply detection walks rooms sequentially)."""
+        return self.conn.execute(
+            f"SELECT room, ts, sender_did AS did, text FROM messages WHERE {self._SIGNED} ORDER BY room, seq", (since,))
+
+    def room_stats(self, since: str) -> Dict[str, Tuple[int, str, str]]:
+        """room -> (messages incl. unsigned, first ts, last ts) in the window."""
+        rows = self.conn.execute("SELECT room, COUNT(*) AS n, MIN(ts) AS lo, MAX(ts) AS hi FROM messages WHERE ts>=? GROUP BY room", (since,))
+        return {r["room"]: (int(r["n"]), r["lo"], r["hi"]) for r in rows}
+
+    def prune_messages(self, before: str) -> int:
+        """Retention: drop messages older than `before`. Agents, notes, snapshots and outbox rows are kept."""
+        return self.conn.execute("DELETE FROM messages WHERE ts < ?", (before,)).rowcount
+
+    # ---- counters (daily usage, reported once a day on Telegram) ----------------------------------------
+    def bump_counter(self, day: str, key: str, n: int = 1) -> None:
+        self.conn.execute(
+            "INSERT INTO counters(day,key,n) VALUES(?,?,?) ON CONFLICT(day,key) DO UPDATE SET n=counters.n+excluded.n",
+            (day, key, n))
+
+    def counters(self, day: str) -> Dict[str, int]:
+        return {r["key"]: int(r["n"]) for r in self.conn.execute("SELECT key, n FROM counters WHERE day=?", (day,))}
+
+    # ---- Milestone D: in-room requests ------------------------------------------------------------------
+    def signed_messages_after(self, room: str, seq: int) -> List[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT seq, ts, sender_did AS did, text FROM messages WHERE room=? AND seq>? AND signed=1 AND sender_did IS NOT NULL ORDER BY seq",
+            (room, seq)).fetchall()
+
+    def max_seq(self, room: str) -> int:
+        row = self.conn.execute("SELECT COALESCE(MAX(seq),0) AS s FROM messages WHERE room=?", (room,)).fetchone()
+        return int(row["s"])
+
+    def record_ask(self, room: str, seq: int, did: str, ts: str, command: str, state: str) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO ask_requests(room,seq,did,ts,command,state) VALUES(?,?,?,?,?,?)",
+            (room, seq, did, ts, command, state))
+
+    def asks_since(self, since: str, did: Optional[str] = None, states: Sequence[str] = ("REPLIED", "CAPACITY")) -> int:
+        marks = ",".join("?" * len(states))
+        if did is None:
+            row = self.conn.execute(f"SELECT COUNT(*) AS n FROM ask_requests WHERE ts>=? AND state IN ({marks})", (since, *states)).fetchone()
+        else:
+            row = self.conn.execute(f"SELECT COUNT(*) AS n FROM ask_requests WHERE did=? AND ts>=? AND state IN ({marks})", (did, since, *states)).fetchone()
+        return int(row["n"])
+
+    def ask_duplicate(self, did: str, command: str, since: str) -> bool:
+        return self.conn.execute(
+            "SELECT 1 FROM ask_requests WHERE did=? AND command=? AND ts>=? AND state='REPLIED' LIMIT 1", (did, command, since)).fetchone() is not None
 
     def agent_by_fp_or_did(self, needle: str) -> Optional[sqlite3.Row]:
         needle = needle.strip()

@@ -9,9 +9,10 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple
 
 from . import formatter, render
+from .ask import open_ask_rooms
 from .config import Settings
 from .identity import Identity
 from .storage import Storage
@@ -71,7 +72,7 @@ class Publisher:
         if scored is not None and now.hour >= self.s.digest_utc_hour:
             marker = f"AGENTSCOUT DIGEST {day}"
             if not self.db.outbox_has(self.s.feed_room, marker):
-                text = render.digest_line(scored, self.db, now)
+                text = render.digest_line(scored, self.db, now, ask_rooms=self.ask_rooms)
                 self._enqueue("digest", marker, text, now)
                 self.refresh_notes(scored, now)
             elif not self._pending_notes and self.notes_catchup_due(now):
@@ -132,9 +133,13 @@ class Publisher:
                 seq = self.landed_seq(room, marker)
             self.db.outbox_update(row["id"], "POSTED", iso(now), posted_seq=seq)
             log.info("posted %s to %s (seq %s, nonce %d)", row["kind"], room, seq, nonce)
-            if self.notify:
+            if self.notify and row["kind"] != "ask":          # ask replies are counted in the daily line, not alerted
                 self.notify.send(f"✅ posted {row['kind']} to /r/{room} (seq {seq}):\n{text}")
             return "POSTED"
+        if status == 400 and "room limit" in body:      # the server's global room cap is full: park, retry later
+            self.db.outbox_update(row["id"], "WAITING_ROOM", iso(now), error=f"400 {body.strip()[:120]}")
+            log.info("post to %s refused: the server's room cap is full and this would be a new room; parked", room)
+            return "WAITING_ROOM"
         if status == 400:
             floor = self._max_nonce_in_ring(room)
             if floor:
@@ -200,8 +205,9 @@ class Publisher:
         notes = {
             "new": render.list_note(render.newest(scored, 10), "newest", now),
             "top": render.list_note(render.top(scored, 10), "top", now),
-            "digest-latest": formatter.note_line(render.digest_line(scored, self.db, now)),
+            "digest-latest": formatter.note_line(render.digest_line(scored, self.db, now, ask_rooms=self.ask_rooms)),
         }
+        self._pending_notes[("guides", "agentscout")] = render.guide_note(self.id.did, self.s, self.ask_rooms)
         for f, r in render.top(scored, self.s.kv_top_n):
             notes[f"agent-{f.fp}"] = render.agent_note(f, r, now)
         for key, value in notes.items():
@@ -258,9 +264,16 @@ class Publisher:
         return False
 
     # ---- DID note ---------------------------------------------------------------------------------
+    @property
+    def ask_rooms(self) -> Optional[List[str]]:
+        """Rooms to advertise for questions; the dedicated one only once it really exists (the server may refuse new rooms)."""
+        rooms = open_ask_rooms(self.db, self.s) if self.s.replies_enabled else []
+        return rooms or None
+
     def did_note_value(self) -> str:
+        ask = f"ask:/r/{self.ask_rooms[0]} " if self.ask_rooms else ""
         return formatter.note_line(
-            f"{self.id.did} name:AgentScout role:network-observer feed:{self.s.feed_room} repo:{self.s.repo_url} "
+            f"{self.id.did} name:AgentScout role:network-observer feed:{self.s.feed_room} {ask}repo:{self.s.repo_url} "
             f"scoring:{self.s.repo_url}/blob/main/SCORING.md observed-behaviour-not-endorsement")
 
     def keepalive_did_note(self, now: datetime) -> None:

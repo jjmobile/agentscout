@@ -5,15 +5,16 @@ import hashlib
 import json
 import re
 import unicodedata
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 DID_PREFIX = "did:key:z6Mk"
 DID_RE = re.compile(r"did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{40,50}")
 KV_REF_RE = re.compile(r"/kv/([a-z0-9][a-z0-9_-]{0,47})/([a-z0-9][a-z0-9_-]{0,47})(?![a-z0-9_/-])")
 NOTE_FIELD_RE = re.compile(r"(?:^|\s)(name|role|mailbox|purpose|room|feed|repo|source)\s*:\s*([^\s|;]+)", re.IGNORECASE)
+DEFAULT_WINDOW_DAYS = 7                       # score what Technocore itself still holds (7-day retention)
 REPLY_WINDOW = timedelta(minutes=30)          # mention-based replies: within this after the target's message
 ADJACENCY_WINDOW = timedelta(minutes=10)      # quiet-room adjacency: another DID answering shortly after
 QUIET_ROOM_MSGS_PER_HOUR = 20.0               # rooms busier than this get no adjacency credit (lobby ≈ 3000/h)
@@ -143,90 +144,59 @@ def aliases_for(did: str, name: Optional[str], handles: Optional[List[str]] = No
     return out
 
 
-def self_handles(msgs: list) -> List[str]:
+def self_handles(counts: Dict[str, int], n_msgs: int) -> List[str]:
     """Handles an agent declares about itself: the "@x" inside a leading "[… @x]" tag, seen in ≥2 of its messages."""
-    counts: Dict[str, int] = defaultdict(int)
-    for m in msgs:
-        mt = SELF_TAG_RE.match(m["text"])
-        if mt:
-            counts[mt.group(1)] += 1
-    return sorted(h for h, n in counts.items() if n >= 2 or n == len(msgs))
+    return sorted(h for h, n in counts.items() if n >= 2 or n == n_msgs)
 
 
-def room_rates(by_room: Dict[str, list]) -> Dict[str, float]:
+def room_rates(room_stats: Dict[str, Tuple[int, str, str]]) -> Dict[str, float]:
     """Messages per hour per room over the span we hold (≥2 messages)."""
     rates: Dict[str, float] = {}
-    for room, ms in by_room.items():
-        if len(ms) < 2:
+    for room, (n, lo, hi) in room_stats.items():
+        if n < 2:
             continue
-        span_h = max(0.05, (parse_ts(ms[-1]["ts"]) - parse_ts(ms[0]["ts"])).total_seconds() / 3600.0)
-        rates[room] = len(ms) / span_h
+        span_h = max(0.05, (parse_ts(hi) - parse_ts(lo)).total_seconds() / 3600.0)
+        rates[room] = n / span_h
     return rates
 
 
-def _messages_by_did(messages) -> Dict[str, list]:
-    out: Dict[str, list] = defaultdict(list)
-    for m in messages:
-        if m["signed"] and m["sender_did"]:
-            out[m["sender_did"]].append(m)
-    return out
+def _since(now: datetime, window_days: int) -> str:
+    return (now - timedelta(days=window_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]] = None) -> Dict[str, AgentFacts]:
-    """One pass over the whole corpus (small: ≤200 msgs per watched room).
+Credit = Tuple[str, str, str, float, bool]   # (target, replier, day, weight, is_reference)
+
+
+def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]] = None,
+                  window_days: int = DEFAULT_WINDOW_DAYS) -> Dict[str, AgentFacts]:
+    """Facts for every signed agent seen in the last `window_days` (Technocore keeps 7 days; so do we).
 
     prelim_scores: when given, replies are dampened by the replier's preliminary score/age
-    (sock-puppet dampening). Callers do two passes: first without, then with.
+    (sock-puppet dampening). Callers do two passes: first without, then with — see render.score_all,
+    which reuses the expensive pass.
     """
-    messages = storage.all_messages()
-    agents = {r["did"]: r for r in storage.agents()}
+    facts, credits, named_pairs = build_facts(storage, now, window_days)
+    apply_replies(facts, credits, named_pairs, prelim_scores)
+    return facts
+
+
+def build_facts(storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS):
+    """Everything except the reply weighting. Streams the window from SQLite: memory is O(agents), not O(messages)."""
+    since = _since(now, window_days)
     notes = storage.notes_by_fp()
     owners = storage.owned_rooms_by_did()
     artifacts = storage.artifacts_by_did()
     summaries = storage.summaries_by_did()
-    by_did = _messages_by_did(messages)
-    by_room: Dict[str, list] = defaultdict(list)
-    for m in messages:
-        by_room[m["room"]].append(m)
-    for room in by_room:
-        by_room[room].sort(key=lambda m: m["seq"])
 
     facts: Dict[str, AgentFacts] = {}
-    for did, row in agents.items():
-        fp = row["fp"]
+    for row in storage.agents_seen_since(since):
+        did, fp = row["did"], row["fp"]
         note = notes.get(fp)
         name = None
         if note:
             _, fields = parse_note(note["text"])
             name = fields.get("name")
         f = AgentFacts(did=did, fp=fp, first_seen=row["first_seen"], last_seen=row["last_seen"], name=name, note_present=note is not None)
-        msgs = by_did.get(did, [])
-        f.signed_msgs = len(msgs)
-        f.days_seen = len({m["ts"][:10] for m in msgs})
-        f.rooms = sorted({m["room"] for m in msgs})
-        per_room: Dict[str, int] = defaultdict(int)
-        for m in msgs:
-            per_room[m["room"]] += 1
-        f.rooms_active = sorted(r for r, n in per_room.items() if n >= 2)
-        if msgs:
-            hashes = [m["text_hash"] for m in msgs]
-            f.dup_ratio = 1.0 - len(set(hashes)) / len(hashes)
-            per_hour: Dict[str, int] = defaultdict(int)
-            for m in msgs:
-                per_hour[m["ts"][:13]] += 1
-            f.max_per_hour = max(per_hour.values())
-            rooms_per_hash: Dict[str, set] = defaultdict(set)
-            for m in msgs:
-                rooms_per_hash[m["text_hash"]].add(m["room"])
-            f.cross_room_identical = sum(1 for rs in rooms_per_hash.values() if len(rs) >= 3)
-            f.contract_spam_msgs = sum(1 for m in msgs if any(r.search(m["text"]) for r in CONTRACT_RES))
-            f.injection_msgs = sum(1 for m in msgs if any(r.search(m["text"]) for r in INJECTION_RES))
-            f.opaque_ratio = sum(1 for m in msgs if is_opaque(m["text"])) / len(msgs)
-            latest = max(msgs, key=lambda m: m["ts"])
-            f.sample = " ".join(latest["text"].split())[:140]
-        f.handles = self_handles(msgs)
-        if msgs:
-            f.templated_ratio = sum(1 for m in msgs if SELF_TAG_RE.match(m["text"])) / len(msgs)
         f.owned_rooms = owners.get(did, [])
         f.artifacts_ok, f.artifacts_total = artifacts.get(did, (0, 0))
         sm = summaries.get(did)
@@ -239,6 +209,55 @@ def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]
         f.days_since_first_seen = max(0.0, (now - parse_ts(row["first_seen"])).total_seconds() / 86400.0)
         facts[did] = f
 
+    # ---- per-agent aggregates, computed inside SQLite ----------------------------------------------
+    for r in storage.iter_agent_stats(since):
+        f = facts.get(r["did"])
+        if f is None:
+            continue
+        f.signed_msgs = int(r["n"])
+        f.days_seen = int(r["days"])
+        f.dup_ratio = 1.0 - int(r["hashes"]) / f.signed_msgs
+        f.max_per_hour = int(r["max_per_hour"])
+    for r in storage.iter_agent_rooms(since):        # ordered by did, room
+        f = facts.get(r["did"])
+        if f is None:
+            continue
+        f.rooms.append(r["room"])
+        if int(r["n"]) >= 2:
+            f.rooms_active.append(r["room"])
+    for did, n in storage.cross_room_identical(since).items():
+        if did in facts:
+            facts[did].cross_room_identical = n
+    for did, text in storage.latest_texts(since).items():
+        if did in facts:
+            facts[did].sample = " ".join(text.split())[:140]
+
+    # ---- per-message text features: one streaming pass ---------------------------------------------
+    handle_counts: Dict[str, Dict[str, int]] = {}
+    templated: Dict[str, int] = defaultdict(int)
+    opaque: Dict[str, int] = defaultdict(int)
+    for r in storage.iter_signed_texts(since):
+        did, text = r["did"], r["text"]
+        f = facts.get(did)
+        if f is None:
+            continue
+        mt = SELF_TAG_RE.match(text)
+        if mt:
+            templated[did] += 1
+            counts = handle_counts.setdefault(did, {})
+            counts[mt.group(1)] = counts.get(mt.group(1), 0) + 1
+        if any(rx.search(text) for rx in CONTRACT_RES):
+            f.contract_spam_msgs += 1
+        if any(rx.search(text) for rx in INJECTION_RES):
+            f.injection_msgs += 1
+        if is_opaque(text):
+            opaque[did] += 1
+    for did, f in facts.items():
+        f.handles = self_handles(handle_counts.get(did, {}), f.signed_msgs)
+        if f.signed_msgs:
+            f.templated_ratio = templated.get(did, 0) / f.signed_msgs
+            f.opaque_ratio = opaque.get(did, 0) / f.signed_msgs
+
     # ---- replies from other DIDs --------------------------------------------------------------------
     # (a) reference (1.0): another signed DID, same room, ≤30 min after one of the agent's messages, whose text names
     #     the agent (DID, z6Mk prefix, "…xxxx", fingerprint, DID-note name, self-declared @handle).
@@ -247,26 +266,34 @@ def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]
     # Discounts: reciprocal naming the same day ×0.25; young/weak replier (sock-puppet) ×0.25.
     # Caps: ≤3 per replier per target per day, ≤20 per replier per day overall.
     index = _reference_index(facts, notes)
-    rates = room_rates(by_room)
+    rates = room_rates(storage.room_stats(since))
+    own = storage.get_setting("own_did")      # AgentScout's own answers must never count as replies (ask → answered → score up)
     named_pairs = set()                       # (replier, target, day) for reciprocity
-    credits: List[Tuple[str, str, str, float, bool]] = []   # (target, replier, day, weight, is_reference)
-    for room, ms in by_room.items():
-        quiet = rates.get(room, 0.0) <= QUIET_ROOM_MSGS_PER_HOUR
-        recent: list = []                      # signed messages in this room, oldest first (pruned to 30 min)
-        for m in ms:
-            if not m["signed"]:
-                continue
-            t = parse_ts(m["ts"])
-            recent = [r for r in recent if t - r[0] <= REPLY_WINDOW]
-            sender = m["sender_did"]
-            day = m["ts"][:10]
-            refs = _referenced_dids(m["text"], index) - {sender}
-            for target in refs:
-                named_pairs.add((sender, target, day))
-                if any(r[1] == target for r in recent):
-                    credits.append((target, sender, day, 1.0, True))
-            templated = bool(SELF_TAG_RE.match(m["text"]))
-            if quiet and not templated and facts.get(sender) is not None and facts[sender].templated_ratio <= 0.5:
+    credits: List[Credit] = []
+    cur_room = None
+    quiet = False
+    last_post: Dict[str, datetime] = {}       # sender -> its latest message time in this room
+    recent: Deque[Tuple[datetime, str, bool]] = deque()   # quiet rooms only: (t, sender, templated), ≤30 min
+    for m in storage.iter_signed_messages(since):
+        room, sender, text = m["room"], m["did"], m["text"]
+        if sender == own:
+            continue
+        if room != cur_room:
+            cur_room, quiet = room, rates.get(room, 0.0) <= QUIET_ROOM_MSGS_PER_HOUR
+            last_post, recent = {}, deque()
+        t = parse_ts(m["ts"])
+        day = m["ts"][:10]
+        refs = _referenced_dids(text, index) - {sender}
+        for target in refs:
+            named_pairs.add((sender, target, day))
+            tt = last_post.get(target)
+            if tt is not None and t - tt <= REPLY_WINDOW:
+                credits.append((target, sender, day, 1.0, True))
+        is_templated = bool(SELF_TAG_RE.match(text))
+        if quiet:
+            while recent and t - recent[0][0] > REPLY_WINDOW:
+                recent.popleft()
+            if not is_templated and facts[sender].templated_ratio <= 0.5:
                 seen_targets = set()
                 for (rt, rdid, rtempl) in recent:
                     if rdid == sender or rdid in refs or rdid in seen_targets or rtempl:
@@ -274,7 +301,17 @@ def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]
                     if t - rt <= ADJACENCY_WINDOW:
                         seen_targets.add(rdid)
                         credits.append((rdid, sender, day, ADJACENCY_WEIGHT, False))
-            recent.append((t, sender, templated))
+            recent.append((t, sender, is_templated))
+        last_post[sender] = t
+    return facts, credits, named_pairs
+
+
+def apply_replies(facts: Dict[str, AgentFacts], credits: List[Credit], named_pairs: set,
+                  prelim_scores: Optional[Dict[str, int]] = None) -> None:
+    """Turn raw reply credits into replies_raw/adjacent/weighted (idempotent: resets first)."""
+    for f in facts.values():
+        f.replies_raw = f.replies_adjacent = 0
+        f.replies_weighted = 0.0
     per_pair_day: Dict[Tuple[str, str, str], int] = defaultdict(int)
     adjacency_pair_day = set()
     replier_day_total: Dict[Tuple[str, str], int] = defaultdict(int)
@@ -305,7 +342,6 @@ def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]
             if young or weak:
                 weight *= 0.25
         f.replies_weighted += weight
-    return facts
 
 
 def _reference_index(facts: Dict[str, "AgentFacts"], notes: Dict[str, object]) -> Dict[str, Dict[str, str]]:

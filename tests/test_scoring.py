@@ -81,14 +81,17 @@ def test_reply_detection_and_sockpuppet_dampening(storage):
 
 
 def test_render_lists_and_digest_work_with_only_db_rows(storage):
-    rows = [(1, T(-30), DID_A, DID_A, True, "hello", "h1"), (2, T(-20), "~nick", None, False, "anon", "h2")]
+    rows = [(1, T(-30), DID_A, DID_A, True, "hello", "h1"), (2, T(-20), "~nick", None, False, "anon", "h2"),
+            (3, T(-25), DID_A, DID_A, True, "second", "h3"), (4, T(-15), DID_B, DID_B, True, "drive-by", "h4")]
     storage.insert_messages("lobby", rows, T(0))
+    storage.insert_messages("builders", [(1, T(-10), DID_A, DID_A, True, "third, elsewhere", "h5")], T(0))
     scored = render.score_all(storage, NOW)
-    assert [f.did for f, _ in render.newest(scored)] == [DID_A]
+    assert [f.did for f, _ in render.newest(scored)] == [DID_A]      # B has one message: not "newest", not news
     assert render.top(scored) == []  # confidence too low
     line = render.digest_line(scored, storage, NOW)
     assert "\n" not in line and line.endswith("Observed behaviour, not endorsement.")
-    assert "AGENTSCOUT DIGEST 2026-08-25" in line and "1 new signed agents" in line
+    assert "AGENTSCOUT DIGEST 2026-08-25" in line and "2 new signed identities, 1 of them active" in line
+    assert "Ask me" not in line and "SCOUT: me" in render.digest_line(scored, storage, NOW, ask_rooms=["builders", "agentscout"])
 
 
 def test_unsigned_never_listed(storage):
@@ -173,7 +176,55 @@ def test_abbreviated_contract_addresses_count_as_contract_spam(storage):
 def test_own_did_is_never_listed(storage):
     storage.set_setting("own_did", DID_A)
     storage.insert_messages("lobby", [(1, T(-30), DID_A, DID_A, True, "AGENTSCOUT DIGEST ...", "h1"),
-                                      (2, T(-20), DID_B, DID_B, True, "hello from B", "h2")], T(0))
+                                      (2, T(-20), DID_B, DID_B, True, "hello from B", "h2"), (3, T(-19), DID_B, DID_B, True, "again", "h3")], T(0))
+    storage.insert_messages("builders", [(1, T(-18), DID_B, DID_B, True, "and here", "h4")], T(0))
     scored = render.score_all(storage, NOW)
     assert DID_A not in scored and DID_B in scored
     assert [f.did for f, _r in render.newest(scored)] == [DID_B]
+
+
+# ---- scale: windowed, streamed census (2026-08-25 OOM incident) ---------------------------------------------
+
+def test_window_limits_agents_and_messages(storage):
+    old = (NOW - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    storage.insert_messages("lobby", [(1, old, DID_B, DID_B, True, "ancient history", "h0"), (2, T(-5), DID_A, DID_A, True, "fresh", "h1")], T(0))
+    facts = compute_facts(storage, NOW)                     # default 7-day window
+    assert set(facts) == {DID_A}
+    facts = compute_facts(storage, NOW, window_days=30)
+    assert set(facts) == {DID_A, DID_B} and facts[DID_B].signed_msgs == 1
+
+
+def test_reference_reply_in_busy_room_uses_30_minute_window(storage):
+    rows = [(i, T(-120 + i), DID_C, DID_C, True, "noise %d" % i, "n%d" % i) for i in range(100)]   # 100 msgs in 100 min: not quiet
+    rows += [(200, T(-40), DID_A, DID_A, True, "I shipped a thing", "ha"),
+             (201, T(-35), DID_B, DID_B, True, "nice work z6MkvUyg", "hb"),          # 5 min after A → counts
+             (202, T(-5), DID_B, DID_B, True, "again z6MkvUyg", "hc")]                # 35 min after A → too late
+    storage.insert_messages("lobby", rows, T(0))
+    f = compute_facts(storage, NOW)[DID_A]
+    assert f.replies_raw == 1 and f.replies_adjacent == 0 and f.replies_weighted == 1.0
+
+
+def test_adjacency_only_in_quiet_rooms(storage):
+    storage.insert_messages("builders", [(1, T(-600), DID_C, DID_C, True, "morning", "h0"),      # 3 msgs in 10 h: quiet room
+                                         (2, T(-30), DID_A, DID_A, True, "does anyone use the signed lane?", "h1"),
+                                         (3, T(-25), DID_B, DID_B, True, "yes, works for me", "h2")], T(0))
+    f = compute_facts(storage, NOW)[DID_A]
+    assert f.replies_adjacent == 1 and f.replies_weighted == 0.5
+    assert compute_facts(storage, NOW)[DID_B].replies_adjacent == 0        # B answered A, not the other way round
+
+
+def test_prune_messages_keeps_agents(storage):
+    old = (NOW - timedelta(days=9)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    storage.insert_messages("lobby", [(1, old, DID_B, DID_B, True, "old", "h0"), (2, T(-5), DID_A, DID_A, True, "new", "h1")], T(0))
+    assert storage.prune_messages((NOW - timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ")) == 1
+    assert storage.counts()["messages"] == 1 and storage.counts()["agents"] == 2
+
+
+def test_agentscouts_own_answers_never_count_as_replies(storage):
+    """Milestone D: asking SCOUT and being answered must not raise the asker's score."""
+    storage.set_setting("own_did", DID_C)
+    storage.insert_messages("builders", [(1, T(-600), DID_B, DID_B, True, "morning", "h0"),
+                                         (2, T(-30), DID_A, DID_A, True, "SCOUT: me", "h1"),
+                                         (3, T(-29), DID_C, DID_C, True, "AGENTSCOUT re#2 for aaaa | card z6MkvUyg", "h2")], T(0))
+    f = compute_facts(storage, NOW)[DID_A]
+    assert f.replies_raw == 0 and f.replies_adjacent == 0 and f.replies_weighted == 0.0
