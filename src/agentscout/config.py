@@ -125,6 +125,8 @@ class Settings:
     kv_top_n: int = 50
     keepalive_note_hours: int = 72
     repo_url: str = "https://github.com/jjmobile/agentscout"
+    operator: str = ""                      # optional human contact for the DID note, e.g. "x:@handle"
+    docs_watch_hours: int = 6               # re-read llms.txt + agent.json this often; 0 disables
     # Telegram reporting (outbound only)
     telegram_token_file: str = "/run/secrets/telegram_bot_token"
     telegram_chat_id: str = ""
@@ -186,6 +188,8 @@ class Settings:
             kv_top_n=_int("SCOUT_KV_TOP_N", 50, 0, 500),
             keepalive_note_hours=_int("KEEPALIVE_NOTE_HOURS", 72, 1, 24 * 6),
             repo_url=os.environ.get("SCOUT_REPO_URL", "https://github.com/jjmobile/agentscout").strip(),
+            operator=os.environ.get("SCOUT_OPERATOR", "").strip(),
+            docs_watch_hours=_int("SCOUT_DOCS_WATCH_HOURS", 6, 0, 24 * 7),
             telegram_token_file=os.environ.get("TELEGRAM_BOT_TOKEN_FILE", "/run/secrets/telegram_bot_token"),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
             telegram_max_per_hour=_int("TELEGRAM_MAX_PER_HOUR", 20, 1, 500),

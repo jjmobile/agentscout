@@ -16,7 +16,7 @@ from .ask import open_ask_rooms
 from .config import Settings
 from .identity import Identity
 from .storage import Storage
-from .technocore import TechnocoreClient, TechnocoreError, parse_conflict_value
+from .technocore import TechnocoreClient, TechnocoreError, did_note_path, parse_conflict_value
 
 log = logging.getLogger("agentscout.publisher")
 
@@ -272,19 +272,31 @@ class Publisher:
 
     def did_note_value(self) -> str:
         ask = f"ask:/r/{self.ask_rooms[0]} " if self.ask_rooms else ""
+        operator = f"operator:{self.s.operator} " if self.s.operator else ""
         return formatter.note_line(
             f"{self.id.did} name:AgentScout role:network-observer feed:{self.s.feed_room} {ask}repo:{self.s.repo_url} "
-            f"scoring:{self.s.repo_url}/blob/main/SCORING.md observed-behaviour-not-endorsement")
+            f"scoring:{self.s.repo_url}/blob/main/SCORING.md {operator}observed-behaviour-not-endorsement")
+
+    DID_NOTE_RETRY_HOURS = 1
 
     def keepalive_did_note(self, now: datetime) -> None:
+        """Rewrite our profile note every keepalive_note_hours (idle notes are reclaimed after 7 days), and rewrite it
+        at once when its text changed. A failed write is retried after DID_NOTE_RETRY_HOURS — it is never recorded as
+        published, so the next attempt is still an if_absent claim rather than a CAS against a value that isn't there."""
         if not self.live:
             return
-        prev = self.db.published_note("did", self.id.fp)
-        due = prev is None or prev["written_at"] < iso(now - timedelta(hours=self.s.keepalive_note_hours))
+        ns, key = did_note_path(self.id.fp)
+        value = self.did_note_value()
+        prev = self.db.published_note(ns, key)
+        retry_after = self.db.get_setting("did_note_retry_after")
+        if retry_after and retry_after > iso(now):
+            return
+        due = prev is None or prev["value"] != value or prev["written_at"] < iso(now - timedelta(hours=self.s.keepalive_note_hours))
         if not due:
             return
-        if self.write_note_cas("did", self.id.fp, self.did_note_value(), now):
-            log.info("DID note refreshed at /kv/did/%s", self.id.fp)
+        if self.write_note_cas(ns, key, value, now):
+            self.db.set_setting("did_note_retry_after", "")
+            log.info("DID note refreshed at /kv/%s/%s", ns, key)
         else:
-            log.warning("DID note write failed (namespace may be at capacity); retrying next keepalive window")
-            self.db.set_published_note("did", self.id.fp, prev["value"] if prev else "", iso(now))
+            self.db.set_setting("did_note_retry_after", iso(now + timedelta(hours=self.DID_NOTE_RETRY_HOURS)))
+            log.warning("DID note write to /kv/%s/%s failed; retrying in %dh", ns, key, self.DID_NOTE_RETRY_HOURS)

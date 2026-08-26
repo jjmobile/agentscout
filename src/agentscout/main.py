@@ -114,6 +114,7 @@ class Runner:
         if time.monotonic() < deadline:
             self.ing.scan_notes(now)
             self.ing.check_artifacts(now)
+            self.ing.watch_docs(now)
         scored = self.maybe_snapshot(now)
         if self.publisher is not None:
             if scored is None and self._digest_due(now):

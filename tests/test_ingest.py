@@ -111,3 +111,18 @@ def test_cycle_budget_stops_polling_and_rotates(server, settings, client, storag
     storage.touch_room("lobby", (NOW - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))   # lobby is now the stalest
     order = storage.rooms_to_poll((NOW + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"))
     assert order[0] == "lobby"                                            # least-recently-polled first, not alphabetical
+
+
+def test_docs_watch_warns_once_per_change_and_names_new_keywords(server, settings, client, storage, caplog):
+    import logging
+    ing = setup(server, settings, client, storage)
+    server.route("/llms.txt", body="READ: GET /r/<room>\nLIMITS: two token buckets\n")
+    with caplog.at_level(logging.INFO):
+        assert ing.watch_docs(NOW) is False                          # baseline, no warning
+        assert ing.watch_docs(NOW + timedelta(hours=1)) is False      # not due yet
+        assert server.requests.count("/llms.txt") == 1
+        server.route("/llms.txt", body="READ: GET /r/<room>\nFAUCET: GET /faucet/<did> hands testnet FLOP to a did:key\n")
+        assert ing.watch_docs(NOW + timedelta(hours=7)) is True
+    warn = [r for r in caplog.records if r.levelno == logging.WARNING and "DOCS CHANGED" in r.getMessage()]
+    assert len(warn) == 1 and "new keywords faucet,flop,testnet" in warn[0].getMessage()
+    assert ing.watch_docs(NOW + timedelta(hours=14)) is False          # unchanged since: quiet

@@ -66,7 +66,12 @@ docker compose exec agentscout python /app/scripts/show_did.py
 scripts/backup_identity.sh ~/agentscout-identity.key.bak     # do this once; a lost key = a lost identity
 ```
 The key is never printed, never committed, never regenerated on rebuild. In Milestone B this DID
-signs every published line; anyone can run this code, only this DID is the official instance.
+signs every published line; anyone can run this code, only this DID is the official instance:
+
+- **official AgentScout DID:** `did:key:z6MkwNoeDd24jWouuvbQkuCwf3a1o14ToqJiKezPcBQc3A7q`
+- fingerprint `f55e08357263dd0f` → profile note `/kv/did-f5/5e08357263dd0f`; operator [@ehrensperger7](https://x.com/ehrensperger7)
+
+Everything signed by that key in `/r/d-agentscout-feed` and the replies to `SCOUT:` requests come from this instance; anything else claiming to be AgentScout is a self-asserted label.
 
 ## Claude summaries (Milestone C)
 Optional decoration: one structured call per qualified agent (`messages.parse` with a Pydantic schema,
@@ -115,7 +120,7 @@ What gets written, and when:
 | daily digest (signed) | `/r/d-agentscout-feed` | first cycle after `SCOUT_DIGEST_UTC_HOUR` |
 | weekly top-10 (signed) | `/r/d-agentscout-feed` | Mondays |
 | `top`, `new`, `digest-latest`, `agent-<fp>` (top `SCOUT_KV_TOP_N`) | `/kv/agentscout/*` | with the digest; CAS-protected, tampering logged and overwritten |
-| DID profile note | `/kv/did/f55e08357263dd0f` | every `KEEPALIVE_NOTE_HOURS` (notes idle 7 days are deleted) |
+| DID profile note | `/kv/did-f5/5e08357263dd0f` (sharded slot: `did-<first 2 hex>/<remaining 14>`; the flat `/kv/did` namespace is full) | every `KEEPALIVE_NOTE_HOURS`, at once when its text changes, hourly retry after a failed write (notes idle 7 days are deleted) |
 
 Posting safety: every line is persisted in the outbox before posting; the signature covers the swept text;
 nonces are persisted and strictly increasing; on any 5xx/timeout the room is read back and the line is only
@@ -129,6 +134,10 @@ All settings are non-secret environment variables; see `.env.example`. Notable:
 - `SCOUT_MAX_READS_PER_MINUTE` — self-imposed cap; further lowered to 20 % of what
   `/.well-known/agent.json` publishes.
 - `PROCESS_BACKLOG_ON_FIRST_START` — read the newest 200 messages per room on an empty DB (free).
+- `SCOUT_OPERATOR` — optional human contact written into the DID note (`operator:x:@handle`), so the DID is
+  attributable both ways (note → repo/handle, README → DID).
+- `SCOUT_DOCS_WATCH_HOURS` (6) — re-read `llms.txt` + `agent.json`; any change is a WARNING (→ Telegram) naming
+  which of faucet/testnet/airdrop/flop/wallet/reward/claim now appear, so a DID-gated faucet is noticed the day it lands.
 - `SCOUT_SCORE_WINDOW_DAYS` (7) / `SCOUT_SCORE_INTERVAL_MINUTES` (30) — the census scores the last N days
   only (messages older than N+1 days are pruned at the daily snapshot) and re-scores at most every M minutes.
   Scoring streams the window out of SQLite, so memory grows with agents, not messages.

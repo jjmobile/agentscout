@@ -236,3 +236,39 @@ def test_notes_catchup_after_digest_posted_without_notes(server, client, storage
     assert pub.notes_catchup_due(NOW) is False                      # notes newer than the digest
     storage.set_published_note("agentscout", "top", "old", T(-120))
     assert pub.notes_catchup_due(NOW) is True                       # one list stale → refresh
+
+
+class NoteCapture(PostCapture):
+    def __init__(self, server, responses):
+        super().__init__(server, responses)
+        self.urls = []
+
+    def __call__(self, url, timeout, body=None):
+        if body is not None:
+            self.urls.append(url.split("example.test", 1)[1])
+        return super().__call__(url, timeout, body)
+
+
+def test_did_note_goes_to_sharded_slot_and_failed_writes_retry_hourly(server, client, storage, tmp_path):
+    s, ident, pub = make(server, client, storage, tmp_path)
+    s.operator = "x:@someone"
+    ns, key = "did-" + ident.fp[:2], ident.fp[2:]
+    cap = NoteCapture(server, [(400, {}, "namespace full")])
+    client._fetch = cap
+    pub.keepalive_did_note(NOW)
+    assert cap.urls == [f"/kv/{ns}/{key}"]
+    assert cap.bodies[0]["if_absent"] is True and cap.bodies[0]["value"].startswith(ident.did)
+    assert "operator:x:@someone" in cap.bodies[0]["value"]
+    assert storage.published_note(ns, key) is None                       # a failure is never recorded as published
+    pub.keepalive_did_note(NOW + timedelta(minutes=30))                  # inside the retry window: no request
+    assert len(cap.urls) == 1
+    cap.responses = [(200, {}, "ok")]
+    pub.keepalive_did_note(NOW + timedelta(hours=2))
+    assert len(cap.urls) == 2 and cap.bodies[1]["if_absent"] is True
+    assert storage.published_note(ns, key)["value"] == pub.did_note_value()
+    pub.keepalive_did_note(NOW + timedelta(hours=3))                     # fresh and unchanged: nothing to do
+    assert len(cap.urls) == 2
+    s.operator = "x:@renamed"                                            # changed text is rewritten at once, as a CAS
+    cap.responses = [(200, {}, "ok")]
+    pub.keepalive_did_note(NOW + timedelta(hours=4))
+    assert len(cap.urls) == 3 and cap.bodies[2]["if"] == cap.bodies[1]["value"]

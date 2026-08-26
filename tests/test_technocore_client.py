@@ -72,3 +72,15 @@ def test_read_budget_sleeps_when_exhausted():
 
 def test_strip_banner_keeps_value_only():
     assert strip_banner("!! UNTRUSTED CONTENT\n\n# comment\nvalue here\n") == "value here"
+
+
+def test_did_note_path_is_sharded_and_read_falls_back_to_legacy(server, client):
+    from agentscout.technocore import did_note_path
+    assert did_note_path("f55e08357263dd0f") == ("did-f5", "5e08357263dd0f")
+    server.route("/kv/did/aa11223344556677", body="!! UNTRUSTED\n\nlegacy note\n")
+    assert client.read_did_note("aa11223344556677") == "legacy note"
+    assert server.requests[-2:] == ["/kv/did-aa/11223344556677", "/kv/did/aa11223344556677"]
+    server.route("/kv/did-bb/11223344556677", body="!! UNTRUSTED\n\nsharded note\n")
+    server.route("/kv/did/bb11223344556677", body="!! UNTRUSTED\n\nstale legacy\n")
+    assert client.read_did_note("bb11223344556677") == "sharded note"
+    assert client.read_did_note("cc11223344556677") is None

@@ -1,6 +1,8 @@
 """Ingestion cycle: rooms, events, DID notes, room owners, artifact checks. Read-only."""
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -51,6 +53,45 @@ class Ingestor:
                  {k: limits.get(k) for k in ("reads_per_minute_per_ip", "writes_per_minute_per_ip", "message_chars", "note_chars", "retention_seconds")},
                  self.c.budget.per_minute)
         return limits
+
+    # ---- protocol docs ----------------------------------------------------------------
+    DOC_KEYWORDS = ("faucet", "testnet", "airdrop", "flop", "wallet", "reward", "claim")
+
+    def watch_docs(self, now: datetime) -> bool:
+        """Every docs_watch_hours re-read llms.txt + agent.json; a change is a WARNING (it reaches Telegram) that
+        names which of DOC_KEYWORDS appear — the $FLOP faucet is announced to arrive through this service, DID-gated,
+        and we want to act the day it lands, not when someone notices. Returns True when a change was seen."""
+        if self.s.docs_watch_hours <= 0:
+            return False
+        last = self.db.get_setting("docs_checked_at")
+        if last and last >= iso(now - timedelta(hours=self.s.docs_watch_hours)):
+            return False
+        try:
+            status, llms = self.c.get("/llms.txt")
+            if status != 200:
+                raise TechnocoreError(f"GET /llms.txt: HTTP {status}")
+            card = json.dumps(self.c.agent_card(), sort_keys=True)
+        except TechnocoreError as exc:
+            log.warning("docs watch: %s", exc)
+            return False
+        self.db.set_setting("docs_checked_at", iso(now))
+        text = llms + "\n" + card
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        low = text.casefold()
+        words = sorted(w for w in self.DOC_KEYWORDS if w in low)
+        prev_digest = self.db.get_setting("docs_hash")
+        prev_words = set((self.db.get_setting("docs_keywords") or "").split(",")) - {""}
+        self.db.set_setting("docs_hash", digest)
+        self.db.set_setting("docs_keywords", ",".join(words))
+        if prev_digest is None:
+            log.info("docs watch: baseline llms.txt+agent.json (%d chars), keywords present: %s", len(text), ",".join(words) or "-")
+            return False
+        if prev_digest == digest:
+            return False
+        new = sorted(set(words) - prev_words)
+        log.warning("TECHNOCORE DOCS CHANGED (llms.txt/agent.json): new keywords %s; present %s — re-read https://technocore.chat/llms.txt",
+                    ",".join(new) or "-", ",".join(words) or "-")
+        return True
 
     # ---- rooms ------------------------------------------------------------------------
     def ensure_config_rooms(self, now: datetime) -> None:
@@ -179,7 +220,7 @@ class Ingestor:
         fetched = 0
         for fp in queue:
             try:
-                text = self.c.read_note("did", fp)
+                text = self.c.read_did_note(fp)
             except TechnocoreError as exc:
                 log.warning("note %s: %s", fp, exc)
                 continue

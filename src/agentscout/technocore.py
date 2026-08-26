@@ -212,6 +212,12 @@ class TechnocoreClient:
                     keys.append(key)
         return keys
 
+    def read_did_note(self, fp: str) -> Optional[str]:
+        """A DID profile note: the sharded slot first, then the legacy /kv/did/<fp> slot of older notes."""
+        ns, key = did_note_path(fp)
+        text = self.read_note(ns, key)
+        return text if text is not None else self.read_note("did", fp)
+
     def read_note(self, ns: str, key: str) -> Optional[str]:
         """Note value with the untrusted-content banner stripped; None when the note does not exist."""
         self._check_name(ns, "namespace")
@@ -279,6 +285,12 @@ class TechnocoreClient:
             raise ValueError("only d- rooms can be owned")
         q = urllib.parse.quote(did, safe="")
         return self.get(f"/kv/room-owners/{room}/set-signed/{q}/{sig}/{nonce}/{q}")
+
+
+def did_note_path(fp: str) -> Tuple[str, str]:
+    """Where a DID note lives: /kv/did-<first 2 hex>/<remaining 14>. The legacy flat /kv/did namespace is
+    full (40,960 keys — a new write there returns 400), so every write goes to the sharded slot."""
+    return f"did-{fp[:2]}", fp[2:]
 
 
 def strip_banner(body: str) -> str:
