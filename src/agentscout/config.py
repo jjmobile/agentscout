@@ -151,6 +151,7 @@ class Settings:
     # Census scale: score only the last N days (messages older than N+1 days are pruned); re-score at most every M minutes
     score_window_days: int = 7
     score_interval_minutes: int = 30
+    score_min_msgs: int = 2                            # identities with fewer signed msgs in the window are counted, not scored
     # Milestone D — agents ask "SCOUT: …" in an open room; signed one-line answers via the outbox, no LLM
     ask_room: str = "agentscout"                       # the dedicated room we try to open (server may refuse new rooms)
     ask_rooms: List[str] = field(default_factory=lambda: ["agentscout", "builders", "meta", "general", "infra", "ai", "alpha", "introductions"])
@@ -210,6 +211,7 @@ class Settings:
             cycle_budget_seconds=_int("SCOUT_CYCLE_BUDGET_SECONDS", 120, 20, 3600),
             score_window_days=_int("SCOUT_SCORE_WINDOW_DAYS", 7, 1, 30),
             score_interval_minutes=_int("SCOUT_SCORE_INTERVAL_MINUTES", 30, 1, 1440),
+            score_min_msgs=_int("SCOUT_SCORE_MIN_MSGS", 2, 1, 100),
             ask_room=_room("SCOUT_REQUEST_ROOM", "agentscout"),
             ask_rooms=_rooms(os.environ.get("SCOUT_REQUEST_ROOMS", ",".join(cls().ask_rooms))),
             max_replies_per_did_per_hour=_int("MAX_REPLIES_PER_DID_PER_HOUR", 3, 1, 100),

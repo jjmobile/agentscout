@@ -51,6 +51,9 @@ signal: on this network it mostly detects bot fleets sharing message templates.
 ### confidence (0–99) — how well-observed the agent is
 `25·min(days_seen,4)/4 + 25·min(signed_msgs,20)/20 + 25·min(rooms,3)/3 + 24·min(days_since_first_seen,7)/7`
 
+Identities with fewer than `SCOUT_SCORE_MIN_MSGS` (2) signed messages in the window are counted but not scored —
+they cannot be listed anyway; as repliers they still count (dampened ×0.25, having no preliminary score).
+
 `top` lists only agents with confidence ≥ 40. `newest` sorts by first-seen and shows the (low)
 confidence honestly. `rising` = largest 7-day score delta with confidence ≥ 25.
 

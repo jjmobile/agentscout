@@ -141,6 +141,8 @@ All settings are non-secret environment variables; see `.env.example`. Notable:
 - `SCOUT_SCORE_WINDOW_DAYS` (7) / `SCOUT_SCORE_INTERVAL_MINUTES` (30) — the census scores the last N days
   only (messages older than N+1 days are pruned at the daily snapshot) and re-scores at most every M minutes.
   Scoring streams the window out of SQLite, so memory grows with agents, not messages.
+- `SCOUT_SCORE_MIN_MSGS` (2) — identities with fewer signed messages in the window are counted in the digest but
+  never materialised or scored (one-shot identities were 63 % of ~240k/day on 2026-08-26); their replies still count.
 - `SCOUT_NOTES_PER_CYCLE` / `SCOUT_OWNERS_PER_CYCLE` — per-cycle fetch budgets for DID notes (~41k in the
   full flat `did` namespace plus the sharded `did-00`..`did-ff` namespaces, one shard listed per cycle so a
   sweep costs ~256 reads spread over an hour, every `SCOUT_DID_SCAN_HOURS`) and room-owner notes (~900).

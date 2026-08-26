@@ -95,7 +95,7 @@ class Runner:
         self._scored = None                      # release the previous census first: peak memory = one census, not two
         if self.pubbot is not None:
             self.pubbot.share_scored(None)
-        self._scored = render.score_all(self.db, now, self.s.score_window_days)
+        self._scored = render.score_all(self.db, now, self.s.score_window_days, self.s.score_min_msgs)
         self._scored_at = now
         log.info("scored %d agents seen in the last %dd in %.1fs", len(self._scored), self.s.score_window_days, time.monotonic() - started)
         if self.pubbot is not None:
@@ -204,7 +204,7 @@ def cli(argv=None) -> int:
     pubbot = None
     if public_token:
         pubbot = PublicBot(public_token, settings.db_path, settings.telegram_public_max_per_user_per_minute,
-                           window_days=settings.score_window_days)
+                           window_days=settings.score_window_days, min_msgs=settings.score_min_msgs)
         pubbot.start()
         runner.pubbot = pubbot                   # the main loop hands its scoring over; the bot rarely scores itself
         log.info("public telegram bot enabled")

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 from . import formatter, render
-from .census import DEFAULT_WINDOW_DAYS
+from .census import DEFAULT_MIN_MSGS, DEFAULT_WINDOW_DAYS
 from .storage import Storage
 
 log = logging.getLogger("agentscout.pubbot")
@@ -56,10 +56,12 @@ def _http(url: str, body: Optional[bytes], timeout: int) -> Tuple[int, str]:
 class PublicBot:
     def __init__(self, token: str, db_path: str, max_per_user_per_minute: int = 10,
                  http: Callable[[str, Optional[bytes], int], Tuple[int, str]] = _http,
-                 clock=time.monotonic, now=lambda: datetime.now(timezone.utc), window_days: int = DEFAULT_WINDOW_DAYS):
+                 clock=time.monotonic, now=lambda: datetime.now(timezone.utc), window_days: int = DEFAULT_WINDOW_DAYS,
+                 min_msgs: int = DEFAULT_MIN_MSGS):
         self._token = token
         self._db_path = db_path
         self._window_days = window_days
+        self._min_msgs = min_msgs
         self._http = http
         self._clock = clock
         self._now = now
@@ -179,7 +181,7 @@ class PublicBot:
         ts, cached = self._scored_cache
         if cached is not None and self._clock() - ts < SCORE_CACHE_SECONDS:
             return cached
-        scored = render.score_all(db, self._now(), self._window_days)
+        scored = render.score_all(db, self._now(), self._window_days, self._min_msgs)
         self._scored_cache = (self._clock(), scored)
         return scored
 

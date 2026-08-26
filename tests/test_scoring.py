@@ -74,8 +74,8 @@ def test_reply_detection_and_sockpuppet_dampening(storage):
     storage.conn.execute("UPDATE agents SET first_seen=? WHERE did=?", (T(-60 * 24 * 10), DID_B))
     for i in range(12):
         storage.insert_messages("r%d" % (i % 4), [(100 + i, (NOW - timedelta(days=i % 6)).strftime("%Y-%m-%dT%H:%M:%SZ"), DID_B, DID_B, True, "message number %d about protocol design" % i, "x%d" % i)], T(0))
-    prelim = {d: score(f).score for d, f in compute_facts(storage, NOW).items()}
-    f = compute_facts(storage, NOW, prelim_scores=prelim)[DID_A]
+    prelim = {d: score(f).score for d, f in compute_facts(storage, NOW, min_msgs=1).items()}
+    f = compute_facts(storage, NOW, prelim_scores=prelim, min_msgs=1)[DID_A]
     assert f.replies_raw == 2
     assert f.replies_weighted == 1.25
 
@@ -140,7 +140,7 @@ def test_reply_by_self_declared_handle_and_fingerprint(storage):
     _put(storage, "builders", 3, -190, DID_B, "[Web-of-Trust @observer_10] Endorsed peer @mint_tracker_d390 for accuracy")
     _put(storage, "builders", 4, -180, DID_C, "see the note at /kv/did/" + fingerprint(DID_A) + " for details")
     _put(storage, "builders", 5, -170, DID_B, "unrelated chatter about nothing")
-    f = compute_facts(storage, NOW)[DID_A]
+    f = compute_facts(storage, NOW, min_msgs=1)[DID_A]
     assert f.handles == ["mint_tracker_d390"]
     assert f.replies_raw == 2 and f.replies_adjacent == 0
 
@@ -154,7 +154,7 @@ def test_adjacency_counts_only_in_quiet_rooms(storage):
     _put(storage, "busy", 1, -30, DID_A, "hello busy room")
     for i in range(2, 302):
         _put(storage, "busy", i, -30 + i * 0.01, DID_C if i % 2 else DID_B, f"noise {i}")
-    f = compute_facts(storage, NOW)[DID_A]
+    f = compute_facts(storage, NOW, min_msgs=1)[DID_A]
     assert f.replies_adjacent == 1 and f.replies_raw == 0
     assert f.replies_weighted == 0.5
 
@@ -164,13 +164,13 @@ def test_fleet_caps_limit_endorsement_spray(storage):
     _put(storage, "r", 2, -99, DID_A, "[Sentinel @target_x] status ok again")
     for i in range(3, 15):
         _put(storage, "r", i, -98 + i * 0.1, DID_B, f"[Web-of-Trust @wot_{i}] Endorsed peer @target_x #{i}")
-    f = compute_facts(storage, NOW)[DID_A]
+    f = compute_facts(storage, NOW, min_msgs=1)[DID_A]
     assert f.replies_raw == 3          # per replier per target per day cap
 
 
 def test_abbreviated_contract_addresses_count_as_contract_spam(storage):
     _put(storage, "builders", 1, -10, DID_A, "[LIVE MINT ACTIVE] morphora on INK (0x585c...fa64) | Stage: Public Live | Supply: 2311")
-    assert compute_facts(storage, NOW)[DID_A].contract_spam_msgs == 1
+    assert compute_facts(storage, NOW, min_msgs=1)[DID_A].contract_spam_msgs == 1
 
 
 def test_own_did_is_never_listed(storage):
@@ -188,9 +188,9 @@ def test_own_did_is_never_listed(storage):
 def test_window_limits_agents_and_messages(storage):
     old = (NOW - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
     storage.insert_messages("lobby", [(1, old, DID_B, DID_B, True, "ancient history", "h0"), (2, T(-5), DID_A, DID_A, True, "fresh", "h1")], T(0))
-    facts = compute_facts(storage, NOW)                     # default 7-day window
+    facts = compute_facts(storage, NOW, min_msgs=1)                     # default 7-day window
     assert set(facts) == {DID_A}
-    facts = compute_facts(storage, NOW, window_days=30)
+    facts = compute_facts(storage, NOW, window_days=30, min_msgs=1)
     assert set(facts) == {DID_A, DID_B} and facts[DID_B].signed_msgs == 1
 
 
@@ -200,7 +200,7 @@ def test_reference_reply_in_busy_room_uses_30_minute_window(storage):
              (201, T(-35), DID_B, DID_B, True, "nice work z6MkvUyg", "hb"),          # 5 min after A → counts
              (202, T(-5), DID_B, DID_B, True, "again z6MkvUyg", "hc")]                # 35 min after A → too late
     storage.insert_messages("lobby", rows, T(0))
-    f = compute_facts(storage, NOW)[DID_A]
+    f = compute_facts(storage, NOW, min_msgs=1)[DID_A]
     assert f.replies_raw == 1 and f.replies_adjacent == 0 and f.replies_weighted == 1.0
 
 
@@ -208,9 +208,9 @@ def test_adjacency_only_in_quiet_rooms(storage):
     storage.insert_messages("builders", [(1, T(-600), DID_C, DID_C, True, "morning", "h0"),      # 3 msgs in 10 h: quiet room
                                          (2, T(-30), DID_A, DID_A, True, "does anyone use the signed lane?", "h1"),
                                          (3, T(-25), DID_B, DID_B, True, "yes, works for me", "h2")], T(0))
-    f = compute_facts(storage, NOW)[DID_A]
+    f = compute_facts(storage, NOW, min_msgs=1)[DID_A]
     assert f.replies_adjacent == 1 and f.replies_weighted == 0.5
-    assert compute_facts(storage, NOW)[DID_B].replies_adjacent == 0        # B answered A, not the other way round
+    assert compute_facts(storage, NOW, min_msgs=1)[DID_B].replies_adjacent == 0        # B answered A, not the other way round
 
 
 def test_prune_messages_keeps_agents(storage):
@@ -226,5 +226,20 @@ def test_agentscouts_own_answers_never_count_as_replies(storage):
     storage.insert_messages("builders", [(1, T(-600), DID_B, DID_B, True, "morning", "h0"),
                                          (2, T(-30), DID_A, DID_A, True, "SCOUT: me", "h1"),
                                          (3, T(-29), DID_C, DID_C, True, "AGENTSCOUT re#2 for aaaa | card z6MkvUyg", "h2")], T(0))
-    f = compute_facts(storage, NOW)[DID_A]
+    f = compute_facts(storage, NOW, min_msgs=1)[DID_A]
     assert f.replies_raw == 0 and f.replies_adjacent == 0 and f.replies_weighted == 0.0
+
+
+def test_one_shot_identities_are_counted_not_scored(storage):
+    rows = [(1, T(-40), DID_A, DID_A, True, "hello builders", "h1"),
+            (2, T(-35), DID_A, DID_A, True, "second message", "h2"),
+            (3, T(-30), DID_B, DID_B, True, "one and done", "h3"),
+            (4, T(-29), DID_C, DID_C, True, f"nice work {DID_A}", "h4")]     # C names A once, then vanishes
+    storage.insert_messages("builders", rows, T(0))
+    scored = render.score_all(storage, NOW)                                # default min_msgs=2
+    assert set(scored) == {DID_A}
+    assert scored[DID_A][0].replies_raw == 1 and scored[DID_A][0].replies_weighted == 0.25   # counted, dampened as before
+    assert storage.new_agents_since(T(-60)) == 3
+    assert "3 new signed identities, 0 of them active" in render.digest_line(scored, storage, NOW)
+    everyone = render.score_all(storage, NOW, min_msgs=1)
+    assert set(everyone) == {DID_A, DID_B, DID_C} and everyone[DID_A][0].replies_weighted == 0.25

@@ -30,7 +30,8 @@ def test_start_notice_at_most_once_per_hour(settings, client, storage):
 
 
 def test_scoring_is_cached_for_the_interval(settings, client, storage):
-    storage.insert_messages("lobby", [(1, (NOW - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"), DID_A, DID_A, True, "hi", "h1")], "x")
+    storage.insert_messages("lobby", [(1, (NOW - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ"), DID_A, DID_A, True, "hi", "h1"),
+                                      (2, (NOW - timedelta(minutes=4)).strftime("%Y-%m-%dT%H:%M:%SZ"), DID_A, DID_A, True, "hi again", "h2")], "x")
     r = runner(settings, client, storage)
     a = r.scored(NOW)
     assert DID_A in a and r.scored(NOW + timedelta(minutes=10)) is a

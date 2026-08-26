@@ -6,18 +6,18 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from . import formatter
-from .census import DEFAULT_WINDOW_DAYS, AgentFacts, apply_replies, build_facts, fingerprint
+from .census import DEFAULT_MIN_MSGS, DEFAULT_WINDOW_DAYS, AgentFacts, apply_replies, build_facts, fingerprint
 from .scoring import ScoreResult, score
 from .storage import Storage
 
 Scored = Dict[str, Tuple[AgentFacts, ScoreResult]]
 
 
-def score_all(storage: Storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS) -> Scored:
+def score_all(storage: Storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS, min_msgs: int = DEFAULT_MIN_MSGS) -> Scored:
     """Two passes: preliminary scores (no dampening) feed the sock-puppet dampening of replies.
     The expensive pass over the messages runs once; only the reply weighting is applied twice.
     AgentScout's own DID is scored (it is a signed agent like any other) but never listed or ranked."""
-    facts, credits, named_pairs = build_facts(storage, now, window_days)
+    facts, credits, named_pairs = build_facts(storage, now, window_days, min_msgs)
     apply_replies(facts, credits, named_pairs, None)
     prelim = {did: score(f).score for did, f in facts.items()}
     apply_replies(facts, credits, named_pairs, prelim)
@@ -87,13 +87,13 @@ def digest_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
     since = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     started = storage.get_setting("observation_started_at") or ""
     new_since = max(since, started)  # backfilled history is not "new": only agents first seen after we started watching
-    new24 = [v for v in scored.values() if v[0].first_seen >= new_since and v[0].signed_msgs > 0]
+    new24 = storage.new_agents_since(new_since)          # every signed identity, including the unscored one-shots
     rooms24 = storage.conn.execute("SELECT COUNT(*) AS n FROM rooms_seen WHERE created_ts >= ?", (since,)).fetchone()["n"]
     msgs24 = storage.conn.execute("SELECT COUNT(*) AS n FROM messages WHERE ts >= ? AND signed=1", (since,)).fetchone()["n"]
     window = "24h" if new_since == since else f"since start {new_since[:16]}Z"
-    active24 = sum(1 for f, _r in new24 if is_active(f))
+    active24 = sum(1 for f, _r in scored.values() if f.first_seen >= new_since and is_active(f))
     parts = [f"AGENTSCOUT DIGEST {day}",
-             f"{window}: {len(new24):,} new signed identities, {active24:,} of them active (≥{MIN_NEWEST_MSGS} msgs in ≥{MIN_NEWEST_ROOMS} rooms), "
+             f"{window}: {new24:,} new signed identities, {active24:,} of them active (≥{MIN_NEWEST_MSGS} msgs in ≥{MIN_NEWEST_ROOMS} rooms), "
              f"{msgs24:,} signed msgs in watched rooms (24h), {rooms24:,} new public rooms (24h)"]
     nw = newest(scored, 3)
     if nw:

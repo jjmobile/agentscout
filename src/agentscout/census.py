@@ -167,21 +167,29 @@ def _since(now: datetime, window_days: int) -> str:
 Credit = Tuple[str, str, str, float, bool]   # (target, replier, day, weight, is_reference)
 
 
+DEFAULT_MIN_MSGS = 2     # identities with a single signed message in the window are counted, not scored (see build_facts)
+
+
 def compute_facts(storage, now: datetime, prelim_scores: Optional[Dict[str, int]] = None,
-                  window_days: int = DEFAULT_WINDOW_DAYS) -> Dict[str, AgentFacts]:
+                  window_days: int = DEFAULT_WINDOW_DAYS, min_msgs: int = DEFAULT_MIN_MSGS) -> Dict[str, AgentFacts]:
     """Facts for every signed agent seen in the last `window_days` (Technocore keeps 7 days; so do we).
 
     prelim_scores: when given, replies are dampened by the replier's preliminary score/age
     (sock-puppet dampening). Callers do two passes: first without, then with — see render.score_all,
     which reuses the expensive pass.
     """
-    facts, credits, named_pairs = build_facts(storage, now, window_days)
+    facts, credits, named_pairs = build_facts(storage, now, window_days, min_msgs)
     apply_replies(facts, credits, named_pairs, prelim_scores)
     return facts
 
 
-def build_facts(storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS):
-    """Everything except the reply weighting. Streams the window from SQLite: memory is O(agents), not O(messages)."""
+def build_facts(storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS, min_msgs: int = DEFAULT_MIN_MSGS):
+    """Everything except the reply weighting. Streams the window from SQLite: memory is O(scored agents), not O(messages).
+
+    Agents with fewer than `min_msgs` signed messages in the window are not materialised (they can never be listed);
+    they are still counted for the digest (Storage.new_agents_since) and their messages still grant reply credit to
+    scored agents exactly as before (a one-shot replier has no preliminary score, so the sock-puppet ×0.25 applies).
+    On 2026-08-26 (361k identities in the window, 63 % one-shot) this is the difference between fitting in 1 GB or not."""
     since = _since(now, window_days)
     notes = storage.notes_by_fp()
     owners = storage.owned_rooms_by_did()
@@ -189,7 +197,7 @@ def build_facts(storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS):
     summaries = storage.summaries_by_did()
 
     facts: Dict[str, AgentFacts] = {}
-    for row in storage.agents_seen_since(since):
+    for row in storage.agents_seen_since(since, min_msgs):
         did, fp = row["did"], row["fp"]
         note = notes.get(fp)
         name = None
@@ -293,7 +301,8 @@ def build_facts(storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS):
         if quiet:
             while recent and t - recent[0][0] > REPLY_WINDOW:
                 recent.popleft()
-            if not is_templated and facts[sender].templated_ratio <= 0.5:
+            sf = facts.get(sender)                    # unscored one-shot sender: its only message is its ratio
+            if not is_templated and (sf.templated_ratio if sf is not None else float(is_templated)) <= 0.5:
                 seen_targets = set()
                 for (rt, rdid, rtempl) in recent:
                     if rdid == sender or rdid in refs or rdid in seen_targets or rtempl:

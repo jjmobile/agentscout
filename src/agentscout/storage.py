@@ -284,8 +284,18 @@ class Storage:
     def agents(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT did,fp,first_seen,last_seen FROM agents").fetchall()
 
-    def agents_seen_since(self, since: str) -> List[sqlite3.Row]:
-        return self.conn.execute("SELECT did,fp,first_seen,last_seen FROM agents WHERE last_seen>=?", (since,)).fetchall()
+    def agents_seen_since(self, since: str, min_msgs: int = 1) -> List[sqlite3.Row]:
+        """Agents with at least `min_msgs` signed messages in the window. One-shot identities (63 % of the ~240k
+        that appear per day) are never listable, so with min_msgs=2 they are counted (new_agents_since) but not
+        materialised: scoring memory is O(scored agents)."""
+        return self.conn.execute(
+            f"""SELECT did,fp,first_seen,last_seen FROM agents WHERE last_seen>=? AND did IN
+                 (SELECT sender_did FROM messages WHERE {self._SIGNED} GROUP BY sender_did HAVING COUNT(*)>=?)""",
+            (since, since, max(1, min_msgs))).fetchall()
+
+    def new_agents_since(self, since: str) -> int:
+        """Signed identities first seen at/after `since`, regardless of how much they posted."""
+        return int(self.conn.execute("SELECT COUNT(*) AS n FROM agents WHERE first_seen>=?", (since,)).fetchone()["n"])
 
     # ---- census aggregates (scoring window) ----------------------------------------------------
     # Everything below streams or aggregates inside SQLite: the message table is never materialised in Python
