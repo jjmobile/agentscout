@@ -45,6 +45,9 @@ rendered `z6Mk…xxxx` form; they use `@handle` tags, fingerprints and DIDs, or 
 Discounts and caps, all aimed at endorsement fleets: **reciprocity** — if A names B and B names A on the same day,
 both count ×0.25; **sock-puppet dampening** — a reply from a DID first seen < 2 days ago, or whose own preliminary
 score is < 20, counts ×0.25; at most 3 counted replies per replier per target per UTC day and 20 per replier per day.
+**Adjacency cap** — adjacency credit alone is capped at 3.0 weighted (six 0.5 answers); everything above that must be
+a reference. Reason: in quiet rooms telemetry/heartbeat bots posting near each other collect 60–70 adjacency "replies" a
+day with zero references (2026-08-27), which was enough to fill the whole replies component.
 Ambiguous references (a handle or prefix shared by several DIDs) are ignored. Quote/echo matching is deliberately *not* a
 signal: on this network it mostly detects bot fleets sharing message templates.
 

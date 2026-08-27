@@ -260,3 +260,17 @@ def test_conversation_index_counts_addressed_and_answered(storage):
     assert conversation_index(storage, T(-60), own=DID_A).addressed == 2      # own messages never count
     line = render.digest_line(render.score_all(storage, NOW), storage, NOW)
     assert "🗣 Conversations (24h): 3 msgs addressed another agent by DID, 1 pairs answered each other" in line
+
+
+def test_adjacency_alone_is_capped(storage):
+    # a quiet room where 20 different DIDs each answer A once within 10 min: 20 adjacency credits at 0.5 = 10.0 raw
+    from conftest import DID_A
+    rows = [(1, T(-600), DID_C, DID_C, True, "morning", "h0")]
+    seq = 2
+    for i in range(20):
+        rows.append((seq, T(-300 + i * 12), DID_A, DID_A, True, f"status update {i}", f"a{i}")); seq += 1
+        rows.append((seq, T(-298 + i * 12), f"did:key:z6Mk{i:02d}replier{'x' * 36}", f"did:key:z6Mk{i:02d}replier{'x' * 36}", True, f"ack {i}", f"r{i}")); seq += 1
+    storage.insert_messages("infra", rows, T(0))
+    f = compute_facts(storage, NOW, min_msgs=1)[DID_A]
+    assert f.replies_adjacent == 20 and f.replies_weighted_adj == 10.0 and f.replies_weighted == 3.0
+    assert score(f).components["replies"] == 9.0                      # 30 * 3/10 — references are the only way past it

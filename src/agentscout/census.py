@@ -19,6 +19,9 @@ REPLY_WINDOW = timedelta(minutes=30)          # mention-based replies: within th
 ADJACENCY_WINDOW = timedelta(minutes=10)      # quiet-room adjacency: another DID answering shortly after
 QUIET_ROOM_MSGS_PER_HOUR = 20.0               # rooms busier than this get no adjacency credit (lobby ≈ 3000/h)
 ADJACENCY_WEIGHT = 0.5
+ADJACENCY_CAP = 3.0                           # adjacency alone can never fill the replies component (= 6 answers at 0.5);
+                                              # beyond that only references count — telemetry bots pinging near each other
+                                              # in quiet rooms collected 60–70 "replies" a day (2026-08-27) with zero references
 MAX_REPLIES_PER_REPLIER_PER_TARGET_PER_DAY = 3
 MAX_REPLIES_PER_REPLIER_PER_DAY = 20          # endorsement-spraying fleets stop counting after this
 RECIPROCAL_DISCOUNT = 0.25                    # A names B and B names A the same day: mutual back-scratching
@@ -112,7 +115,8 @@ class AgentFacts:
     cross_room_identical: int = 0
     replies_raw: int = 0             # mention/fingerprint/handle references by other DIDs
     replies_adjacent: int = 0        # answers within 10 min in quiet rooms (counted at 0.5)
-    replies_weighted: float = 0.0
+    replies_weighted: float = 0.0    # reference weight + min(adjacency weight, ADJACENCY_CAP)
+    replies_weighted_adj: float = 0.0
     handles: List[str] = field(default_factory=list)   # self-declared "@handle" tags seen in its own messages
     templated_ratio: float = 0.0     # share of its messages that are "[Role @handle] …" broadcasts
     owned_rooms: List[str] = field(default_factory=list)
@@ -320,7 +324,7 @@ def apply_replies(facts: Dict[str, AgentFacts], credits: List[Credit], named_pai
     """Turn raw reply credits into replies_raw/adjacent/weighted (idempotent: resets first)."""
     for f in facts.values():
         f.replies_raw = f.replies_adjacent = 0
-        f.replies_weighted = 0.0
+        f.replies_weighted = f.replies_weighted_adj = 0.0
     per_pair_day: Dict[Tuple[str, str, str], int] = defaultdict(int)
     adjacency_pair_day = set()
     replier_day_total: Dict[Tuple[str, str], int] = defaultdict(int)
@@ -350,7 +354,12 @@ def apply_replies(facts: Dict[str, AgentFacts], credits: List[Credit], named_pai
             weak = prelim_scores.get(replier, 0) < 20
             if young or weak:
                 weight *= 0.25
-        f.replies_weighted += weight
+        if is_ref:
+            f.replies_weighted += weight
+        else:
+            f.replies_weighted_adj += weight
+    for f in facts.values():
+        f.replies_weighted += min(f.replies_weighted_adj, ADJACENCY_CAP)
 
 
 def _reference_index(facts: Dict[str, "AgentFacts"], notes: Dict[str, object]) -> Dict[str, Dict[str, str]]:
