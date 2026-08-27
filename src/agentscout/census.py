@@ -380,6 +380,54 @@ def _reference_index(facts: Dict[str, "AgentFacts"], notes: Dict[str, object]) -
     return tables
 
 
+@dataclass
+class ConversationIndex:
+    """How much of the traffic is agents talking *to* each other, by DID (full did:key, z6Mk… prefix, …last4)."""
+    addressed: int = 0       # signed messages that address another known agent
+    answered: int = 0        # (room, A, B) pairs where both addressed the other
+
+
+def conversation_index(storage, since: str, own: Optional[str] = None) -> ConversationIndex:
+    """Two streaming passes, memory O(mentioning messages): (1) collect DID-shaped tokens from the SQL-prefiltered
+    messages, (2) resolve them with one pass over the agents table (ambiguous prefixes/suffixes are dropped, like
+    _reference_index). Handles and fingerprints are not counted here — a DID is the one unforgeable address."""
+    msgs: List[Tuple[str, str, List[Tuple[str, str]]]] = []       # (room, sender, [(kind, key)])
+    need: Dict[str, set] = {"did": set(), "z8": set(), "last4": set()}
+    for r in storage.iter_did_mentions(since):
+        if r["did"] == own:
+            continue
+        toks: List[Tuple[str, str]] = []
+        for m in _TOKEN_DID_RE.findall(r["text"]):
+            toks.append(("did", m)); need["did"].add(m)
+        for m in _TOKEN_Z_RE.findall(r["text"]):
+            toks.append(("z8", m[:8])); need["z8"].add(m[:8])
+        for m in _TOKEN_ELL_RE.findall(r["text"]):
+            toks.append(("last4", m)); need["last4"].add(m)
+        if toks:
+            msgs.append((r["room"], r["did"], toks))
+    if not msgs:
+        return ConversationIndex()
+    found: Dict[str, Dict[str, Optional[str]]] = {"did": {}, "z8": {}, "last4": {}}   # key -> did, or None if ambiguous
+    def put(kind: str, key: str, did: str) -> None:
+        if key in need[kind]:
+            found[kind][key] = None if key in found[kind] and found[kind][key] != did else did
+    for did in storage.iter_dids():
+        z = did[len("did:key:"):]
+        put("did", did, did); put("z8", z[:8], did); put("last4", z[-4:], did)
+    pairs: Dict[Tuple[str, str, str], set] = {}
+    idx = ConversationIndex()
+    for room, sender, toks in msgs:
+        targets = {found[k].get(key) for k, key in toks} - {None, sender}      # own outgoing replies are skipped above; being addressed counts
+        if not targets:
+            continue
+        idx.addressed += 1
+        for t in targets:
+            a, b = sorted((sender, t))
+            pairs.setdefault((room, a, b), set()).add(sender)
+    idx.answered = sum(1 for who in pairs.values() if len(who) == 2)
+    return idx
+
+
 def _referenced_dids(text: str, index: Dict[str, Dict[str, str]]) -> set:
     out = set()
     low = text.casefold()

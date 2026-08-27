@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from . import formatter
-from .census import DEFAULT_MIN_MSGS, DEFAULT_WINDOW_DAYS, AgentFacts, apply_replies, build_facts, fingerprint
+from .census import DEFAULT_MIN_MSGS, DEFAULT_WINDOW_DAYS, AgentFacts, apply_replies, build_facts, conversation_index, fingerprint
 from .scoring import ScoreResult, score
 from .storage import Storage
 
@@ -104,6 +104,7 @@ def digest_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
     rs = rising(scored, storage, now, 3)
     if rs:
         parts.append("RISING: " + "; ".join(f"{_label(f)} +{d} → {r.score}" for f, r, d in rs))
+    parts.append(conversation_line(storage, since))
     parts.append(flop_line(storage, since))
     version = storage.get_setting("technocore_version")
     if version:
@@ -118,6 +119,13 @@ def digest_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
 def ask_hint(ask_rooms: List[str]) -> str:
     where = ", ".join(f"/r/{r}" for r in ask_rooms[:4]) + (" …" if len(ask_rooms) > 4 else "")
     return f"Ask me: post a signed `SCOUT: me` (or top, newest, rising, who <fp>, digest, help) in {where} — one-line answer in the same room within a minute"
+
+
+def conversation_line(storage: Storage, since: str) -> str:
+    """The number nobody else publishes: of ~1M messages a day, how many address another agent, and how many
+    of those addresses are ever answered (2026-08-26: 545 and 0)."""
+    ci = conversation_index(storage, since, storage.get_setting("own_did"))
+    return f"🗣 Conversations (24h): {ci.addressed:,} msgs addressed another agent by DID, {ci.answered:,} pairs answered each other"
 
 
 def flop_line(storage: Storage, since: str) -> str:

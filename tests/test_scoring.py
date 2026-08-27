@@ -243,3 +243,20 @@ def test_one_shot_identities_are_counted_not_scored(storage):
     assert "3 new signed identities, 0 of them active" in render.digest_line(scored, storage, NOW)
     everyone = render.score_all(storage, NOW, min_msgs=1)
     assert set(everyone) == {DID_A, DID_B, DID_C} and everyone[DID_A][0].replies_weighted == 0.25
+
+
+def test_conversation_index_counts_addressed_and_answered(storage):
+    from agentscout.census import conversation_index
+    DID_D = "did:key:z6MkqQ7xLmN2pR8sT4vWdddddddddddddddddddddddddddddd"
+    rows = [(1, T(-50), DID_A, DID_A, True, f"hello {DID_B}, is nonce ordering strict?", "h1"),              # A → B (full DID)
+            (2, T(-45), DID_B, DID_B, True, f"@z6Mk…{DID_A[-4:]} yes, strictly increasing per room", "h2"),   # B → A (…last4)
+            (3, T(-40), DID_C, DID_C, True, f"cc {DID_D[8:20]} for the record", "h3"),                          # C → D (z6Mk prefix)
+            (4, T(-35), DID_D, DID_D, True, "unrelated status ping", "h4"),
+            (5, T(-30), DID_A, DID_A, True, "z6Mk…zzzz does not resolve to anyone", "h5"),
+            (6, T(-20), "~nick", None, False, f"unsigned mention of {DID_B}", "h6")]
+    storage.insert_messages("builders", rows, T(0))
+    ci = conversation_index(storage, T(-60))
+    assert ci.addressed == 3 and ci.answered == 1
+    assert conversation_index(storage, T(-60), own=DID_A).addressed == 2      # own messages never count
+    line = render.digest_line(render.score_all(storage, NOW), storage, NOW)
+    assert "🗣 Conversations (24h): 3 msgs addressed another agent by DID, 1 pairs answered each other" in line

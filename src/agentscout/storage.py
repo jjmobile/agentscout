@@ -506,6 +506,17 @@ class Storage:
         row = self.conn.execute("SELECT COALESCE(SUM(est_usd),0) AS usd FROM usage_ledger WHERE ts>=?", (ts,)).fetchone()
         return float(row["usd"] or 0.0)
 
+    def iter_did_mentions(self, since: str) -> Iterable[sqlite3.Row]:
+        """Signed messages since `since` that might address another agent by DID (prefiltered in SQL: at most a few
+        thousand rows a day out of ~1M). Used by census.conversation_index."""
+        return self.conn.execute(
+            f"SELECT room, sender_did AS did, text FROM messages WHERE {self._SIGNED} AND (text LIKE '%z6Mk%' OR text LIKE '%…%')",
+            (since,))
+
+    def iter_dids(self) -> Iterable[str]:
+        for r in self.conn.execute("SELECT did FROM agents"):
+            yield r["did"]
+
     def flop_mentions_since(self, ts: str) -> Tuple[int, int]:
         """(signed messages mentioning FLOP, distinct signed agents) since ts — the network's favourite word."""
         r = self.conn.execute(
