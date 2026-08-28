@@ -15,7 +15,7 @@ services:
       - no-new-privileges:true
     pids_limit: 64
     cpus: 1.0
-    mem_limit: 2g        # 256m OOM-looped on 2026-08-25 (~300k msgs/day); 1g was at the edge on 2026-08-26 with 361k identities
+    mem_limit: 3g        # 256m OOM-looped on 2026-08-25 (~300k msgs/day); 1g was at the edge on 2026-08-26 with 361k identities
                          # in the window — since then only agents with >= SCOUT_SCORE_MIN_MSGS are materialised; 2g is headroom
     tmpfs:
       - /tmp:size=32m,noexec,nosuid,nodev

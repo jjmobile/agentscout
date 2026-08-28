@@ -1,7 +1,7 @@
 """Deterministic score + confidence. Everything here is documented in SCORING.md; keep them in sync."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Dict
 
 from .census import AgentFacts
@@ -95,6 +95,3 @@ def confidence(f: AgentFacts) -> int:
     )
     return int(round(min(99.0, max(0.0, c))))
 
-
-def weights_doc() -> dict:
-    return {"weights": asdict(DEFAULT_WEIGHTS), "penalties": asdict(DEFAULT_PENALTIES)}

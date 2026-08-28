@@ -5,6 +5,8 @@ Inbound text is untrusted data: only exact commands are recognised; everything e
 """
 from __future__ import annotations
 
+import hashlib
+
 import json
 import logging
 import re
@@ -170,7 +172,9 @@ class PublicBot:
         started = self._clock()
         self._send(chat_id, self.answer(db, cmd, arg))
         self.answered += 1
-        db.bump_counter(self._now().strftime("%Y-%m-%d"), "pubbot_answered")
+        day = self._now().strftime("%Y-%m-%d")
+        db.bump_counter(day, "pubbot_answered")
+        db.bump_counter(day, "pubbot_user:" + hashlib.sha256(str(user_id).encode()).hexdigest()[:8])   # distinct users, hashed
         log.info("pubbot: /%s answered in %.1fs", cmd, self._clock() - started)
 
     def share_scored(self, scored: Optional[dict]) -> None:

@@ -59,7 +59,9 @@ def test_replies_are_signed_outbox_lines_with_marker(storage, tmp_path):
     assert rows[0]["room"] == "agentscout" and rows[0]["text"].startswith(f"AGENTSCOUT re#1 for {DID_A}"[:20])
     assert "score" in rows[0]["text"] and rows[0]["text"].endswith("Observed behaviour, not endorsement.")
     assert "TOP" in rows[1]["text"]
-    assert storage.counters(NOW.strftime("%Y-%m-%d")) == {"ask_replied": 2}
+    c = storage.counters(NOW.strftime("%Y-%m-%d"))
+    assert {k: v for k, v in c.items() if ":" not in k} == {"ask_replied": 2}
+    assert sum(1 for k in c if k.startswith("ask_asker:")) == 1          # one asker, two replies
     assert asker.tick(NOW, scored_for(storage)) == 0        # nothing new: nothing answered twice
 
 

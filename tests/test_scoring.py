@@ -274,3 +274,15 @@ def test_adjacency_alone_is_capped(storage):
     f = compute_facts(storage, NOW, min_msgs=1)[DID_A]
     assert f.replies_adjacent == 20 and f.replies_weighted_adj == 10.0 and f.replies_weighted == 3.0
     assert score(f).components["replies"] == 9.0                      # 30 * 3/10 — references are the only way past it
+
+
+def test_usage_line_collapses_per_id_keys_and_counts_mentions(storage):
+    from agentscout.storage import Storage  # noqa: F401  (fixture type)
+    counters = {"pubbot_answered": 5, "pubbot_user:aa11bb22": 3, "pubbot_user:cc33dd44": 2, "ask_replied": 2, "ask_asker:R1HLstWk": 2}
+    own = DID_C
+    storage.insert_messages("builders", [(1, T(-30), DID_A, DID_A, True, f"thanks AgentScout for the report {own}", "h1"),
+                                         (2, T(-20), DID_B, DID_B, True, "agentscout ranks by behaviour, nice", "h2"),
+                                         (3, T(-10), own, own, True, "AGENTSCOUT re#1 ...", "h3")], T(0))
+    assert storage.mentions_since(T(-60), own) == (2, 2)                         # our own line does not count
+    line = render.usage_line(counters, storage.mentions_since(T(-60), own))
+    assert line == "ask_replied=2, pubbot_answered=5, pubbot_users=2, ask_askers=1, mentions_by_others=2/2 DIDs"

@@ -87,7 +87,12 @@ class Asker:
         self.db.ensure_room(self.room, "config", None, iso(now))     # exists now: poll it like the other ask rooms
         week = now.strftime("%G-W%V")
         marker = f"AGENTSCOUT ASK HELP {week}"
-        if self.db.outbox_has(self.room, marker) is None:
+        help_row = self.db.outbox_has(self.room, marker)
+        if help_row is not None and help_row["state"] in ("WAITING_ROOM", "FAILED_FINAL") \
+                and help_row["updated_at"] < iso(now - ROOM_RETRY):
+            self.db.outbox_retry(help_row["id"], iso(now))       # parked when the room cap was full: the room exists now
+            log.info("ask help line for /r/%s parked earlier; retrying", self.room)
+        if help_row is None:
             self.db.enqueue(self.room, HELP_KIND, marker, formatter.one_line([
                 marker, "SCOUT: me → your own card · SCOUT: top → best-scored agents · SCOUT: who <fp> → one agent",
                 "signed requests only · exact commands only · names are self-asserted · rules: /kv/guides/agentscout"]), iso(now))
@@ -142,6 +147,7 @@ class Asker:
                 self.db.enqueue(room, "ask", f"AGENTSCOUT re#{m['seq']}", text, iso(now))
                 self.db.record_ask(room, m["seq"], m["did"], m["ts"], command, state)
                 self.db.bump_counter(day, "ask_replied")
+                self.db.bump_counter(day, f"ask_asker:{m['did'][-8:]}")        # distinct askers per day (suffix only)
                 enqueued += 1
                 log.info("ask #%d in /r/%s from %s: %s → queued (%d chars)", m["seq"], room, m["did"][-8:], command, len(text))
             else:
