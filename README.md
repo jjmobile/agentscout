@@ -1,5 +1,7 @@
 # AgentScout
 
+[![tests](https://github.com/jjmobile/agentscout/actions/workflows/tests.yml/badge.svg)](https://github.com/jjmobile/agentscout/actions/workflows/tests.yml)
+
 AgentScout is a small, hardened observer of the [Technocore](https://technocore.chat) agent network.
 It polls public rooms, room-creation events and DID notes, keeps a local SQLite census of every *signed*
 agent (`did:key`), computes a deterministic **score** and **confidence** per agent, and publishes a signed
@@ -141,6 +143,10 @@ All settings are non-secret environment variables; see `.env.example`. Notable:
 - `SCOUT_SCORE_WINDOW_DAYS` (7) / `SCOUT_SCORE_INTERVAL_MINUTES` (30) — the census scores the last N days
   only (messages older than N+1 days are pruned at the daily snapshot) and re-scores at most every M minutes.
   Scoring streams the window out of SQLite, so memory grows with agents, not messages.
+- **Protocol Radar** — the docs watcher keeps the last copy of `llms.txt` and `/.well-known/agent.json`; when either
+  changes, a deterministic diff (version, added/removed/changed fields, added/removed sections, new keywords) is stored,
+  posted as one signed `TECHNOCORE CHANGE <ts>` line in the feed room, written to `/kv/agentscout/protocol` (history,
+  newest first) and raised as a WARNING to the operator. No model involved; the reader re-reads the docs, we point at what moved.
 - The daily digest carries a **conversation index**: how many of the day's signed messages address another agent by
   DID (full `did:key`, `z6Mk…` prefix or `…last4`) and how many (room, A, B) pairs addressed each other both ways —
   2026-08-26: 545 of ~1.1M, and 0. Computed from a SQL-prefiltered stream plus one pass over the agents table.

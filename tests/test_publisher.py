@@ -272,3 +272,20 @@ def test_did_note_goes_to_sharded_slot_and_failed_writes_retry_hourly(server, cl
     cap.responses = [(200, {}, "ok")]
     pub.keepalive_did_note(NOW + timedelta(hours=4))
     assert len(cap.urls) == 3 and cap.bodies[2]["if"] == cap.bodies[1]["value"]
+
+
+def test_protocol_change_is_published_once_as_a_signed_line_and_a_note(server, client, storage, tmp_path):
+    from agentscout import radar
+    s, ident, pub = make(server, client, storage, tmp_path)
+    old = {"version": "0.7.0", "limits": {"reads_per_minute_per_ip": 600}}
+    new = {"version": "0.9.7", "limits": {"reads_per_minute_per_ip": 900}}
+    change = radar.compare(NOW, "## READ\n", "## READ\n## FAUCET\nGET /faucet/<did>\n", old, new)
+    storage.set_doc_snapshot("agent.json", json.dumps(new), T(0))
+    storage.add_protocol_change(change.ts, change.old_version, change.new_version, change.summary(), change.to_json())
+    server.route("/kv/agentscout/protocol", status=500, body="nope")          # note write fails: stays pending
+    assert pub.publish_protocol_change(NOW) == 1
+    row = storage.outbox_has(s.feed_room, "TECHNOCORE CHANGE 2026-08-25T12:00Z")
+    assert row is not None and row["kind"] == "protocol" and "v0.7.0 → v0.9.7" in row["text"] and "+FAUCET" in row["text"]
+    assert ("agentscout", "protocol") in pub._pending_notes and "agent.json-version=0.9.7" in pub._pending_notes[("agentscout", "protocol")]
+    assert pub.publish_protocol_change(NOW + timedelta(hours=1)) == 0        # already published: nothing new
+    assert storage.unpublished_protocol_changes() == []

@@ -96,6 +96,14 @@ MIGRATIONS: List[str] = [
     CREATE INDEX ask_requests_did_ts ON ask_requests(did, ts);
     CREATE TABLE counters (day TEXT NOT NULL, key TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY(day, key));
     """,
+    # v6 — Protocol Radar: last copy of the protocol docs + history of detected changes
+    """
+    CREATE TABLE doc_snapshots (name TEXT PRIMARY KEY, text TEXT NOT NULL, fetched_at TEXT NOT NULL);
+    CREATE TABLE protocol_changes (
+        id INTEGER PRIMARY KEY, ts TEXT NOT NULL, old_version TEXT, new_version TEXT,
+        summary TEXT NOT NULL, detail TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 0
+    );
+    """,
 ]
 
 
@@ -516,6 +524,39 @@ class Storage:
     def iter_dids(self) -> Iterable[str]:
         for r in self.conn.execute("SELECT did FROM agents"):
             yield r["did"]
+
+    # ---- Protocol Radar ------------------------------------------------------------------------------
+    def doc_snapshot(self, name: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute("SELECT text, fetched_at FROM doc_snapshots WHERE name=?", (name,)).fetchone()
+
+    def set_doc_snapshot(self, name: str, text: str, now: str) -> None:
+        self.conn.execute(
+            "INSERT INTO doc_snapshots(name,text,fetched_at) VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET text=excluded.text, fetched_at=excluded.fetched_at",
+            (name, text, now))
+
+    def add_protocol_change(self, ts: str, old_version: Optional[str], new_version: Optional[str], summary: str, detail: str) -> int:
+        cur = self.conn.execute("INSERT INTO protocol_changes(ts,old_version,new_version,summary,detail) VALUES(?,?,?,?,?)",
+                                (ts, old_version, new_version, summary, detail))
+        return int(cur.lastrowid)
+
+    def protocol_changes(self, limit: int = 20, since: Optional[str] = None) -> List[sqlite3.Row]:
+        if since:
+            return self.conn.execute("SELECT * FROM protocol_changes WHERE ts>=? ORDER BY id DESC LIMIT ?", (since, limit)).fetchall()
+        return self.conn.execute("SELECT * FROM protocol_changes ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+    def unpublished_protocol_changes(self) -> List[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM protocol_changes WHERE published=0 ORDER BY id").fetchall()
+
+    def mark_protocol_change_published(self, row_id: int) -> None:
+        self.conn.execute("UPDATE protocol_changes SET published=1 WHERE id=?", (row_id,))
+
+    def mentions_since(self, ts: str, own_did: Optional[str]) -> Tuple[int, int]:
+        """(signed messages by OTHER DIDs naming AgentScout or our DID, distinct senders) since ts."""
+        own = own_did or ""
+        r = self.conn.execute(
+            """SELECT COUNT(*) AS n, COUNT(DISTINCT sender_did) AS a FROM messages WHERE signed=1 AND ts>=? AND sender_did<>?
+               AND (lower(text) LIKE '%agentscout%' OR (?<>'' AND text LIKE '%' || ? || '%'))""", (ts, own, own, own)).fetchone()
+        return int(r["n"] or 0), int(r["a"] or 0)
 
     def flop_mentions_since(self, ts: str) -> Tuple[int, int]:
         """(signed messages mentioning FLOP, distinct signed agents) since ts — the network's favourite word."""

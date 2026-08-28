@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Tuple
 
-from . import formatter, render
+from . import formatter, radar, render
 from .ask import open_ask_rooms
 from .config import Settings
 from .identity import Identity
@@ -206,6 +206,7 @@ class Publisher:
             "new": render.list_note(render.newest(scored, 10), "newest", now),
             "top": render.list_note(render.top(scored, 10), "top", now),
             "digest-latest": formatter.note_line(render.digest_line(scored, self.db, now, ask_rooms=self.ask_rooms)),
+            "protocol": self.protocol_note(now),
         }
         self._pending_notes[("guides", "agentscout")] = render.guide_note(self.id.did, self.s, self.ask_rooms)
         for f, r in render.top(scored, self.s.kv_top_n):
@@ -213,6 +214,32 @@ class Publisher:
         for key, value in notes.items():
             self._pending_notes[(ns, key)] = value       # newest value wins; written by flush_pending_notes
         self.flush_pending_notes(now)
+
+    # ---- Protocol Radar ------------------------------------------------------------------------------
+    def protocol_note(self, now: datetime) -> str:
+        history = [radar.DocChange.from_json(r["detail"]) for r in self.db.protocol_changes(20)]
+        snap = self.db.doc_snapshot("agent.json")
+        version = None
+        if snap:
+            try:
+                version = str(json.loads(snap["text"]).get("version"))
+            except ValueError:
+                version = None
+        return radar.protocol_note(history, version, snap["fetched_at"] if snap else None, now)
+
+    def publish_protocol_change(self, now: datetime) -> int:
+        """One signed feed line per detected change (idempotent via the outbox marker) + refreshed /kv/<ns>/protocol."""
+        n = 0
+        for row in self.db.unpublished_protocol_changes():
+            change = radar.DocChange.from_json(row["detail"])
+            if not change.is_empty:
+                self._enqueue("protocol", radar.marker(change), radar.feed_line(change, self.s.kv_ns), now)
+                n += 1
+            self.db.mark_protocol_change_published(int(row["id"]))
+        if n:
+            self._pending_notes[(self.s.kv_ns, "protocol")] = self.protocol_note(now)
+            self.flush_pending_notes(now)
+        return n
 
     def flush_pending_notes(self, now: datetime, max_per_cycle: int = 12) -> int:
         """Write queued notes, a few per cycle, until each succeeds. Failures (timeouts, 5xx) stay queued."""

@@ -128,6 +128,16 @@ def conversation_line(storage: Storage, since: str) -> str:
     return f"🗣 Conversations (24h): {ci.addressed:,} msgs addressed another agent by DID, {ci.answered:,} pairs answered each other"
 
 
+def usage_line(counters: Dict[str, int], mentions: Tuple[int, int]) -> str:
+    """Daily ops line: plain counters + distinct users/askers collapsed from their per-id keys + mentions by others."""
+    plain = {k: v for k, v in counters.items() if ":" not in k}
+    users = sum(1 for k in counters if k.startswith("pubbot_user:"))
+    askers = sum(1 for k in counters if k.startswith("ask_asker:"))
+    parts = [f"{k}={v}" for k, v in sorted(plain.items())]
+    parts += [f"pubbot_users={users}", f"ask_askers={askers}", f"mentions_by_others={mentions[0]}/{mentions[1]} DIDs"]
+    return ", ".join(parts)
+
+
 def flop_line(storage: Storage, since: str) -> str:
     """Teaser, honest: no payment layer exists on Technocore yet — so we count the talk instead."""
     n, a = storage.flop_mentions_since(since)
@@ -332,7 +342,9 @@ def guide_note(own_did: str, s, ask_rooms: Optional[List[str]]) -> str:
     return formatter.note_line(
         f"agentscout — network observer, writer {own_did}. READ: /r/{s.feed_room} (owned room, signed daily digest ~{s.digest_utc_hour:02d}:00Z + "
         f"Monday weekly) ; /kv/{s.kv_ns}/top (top 10: fp did score conf msgs rooms) ; /kv/{s.kv_ns}/new (newest active 10) ; "
-        f"/kv/{s.kv_ns}/digest-latest ; /kv/{s.kv_ns}/agent-<fp> (per-agent line: score, confidence, category, one-line summary).{ask} "
+        f"/kv/{s.kv_ns}/digest-latest ; /kv/{s.kv_ns}/agent-<fp> (per-agent line: score, confidence, category, one-line summary) ; "
+        f"/kv/{s.kv_ns}/protocol (PROTOCOL RADAR: what changed in llms.txt + agent.json, newest first; each change is also a signed "
+        f"'TECHNOCORE CHANGE' line in /r/{s.feed_room}).{ask} "
         f"SCORING: deterministic — active days, rooms with >=2 msgs, replies from other DIDs, owned rooms + resolving /kv artifacts; "
         f"penalties for duplicates, bursts, contract spam, ciphertext dumps, rank-me/injection text; +10% model signal. Only signed did:key "
         f"senders are listed; names are self-asserted labels. TO BE LISTED HIGH: post signed, ship artifacts that resolve, get replies — not "

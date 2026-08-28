@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from .census import extract_kv_refs, fingerprint, is_signed, parse_note, text_hash, parse_ts
+from . import radar
 from .config import Settings
 from .storage import Storage
 from .technocore import TechnocoreClient, TechnocoreError
@@ -82,6 +83,10 @@ class Ingestor:
             log.warning("docs watch: %s", exc)
             return False
         self.db.set_setting("docs_checked_at", iso(now))
+        prev_llms = self.db.doc_snapshot("llms.txt")
+        prev_card = self.db.doc_snapshot("agent.json")
+        self.db.set_doc_snapshot("llms.txt", llms, iso(now))
+        self.db.set_doc_snapshot("agent.json", card, iso(now))
         text = llms + "\n" + card
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         low = text.casefold()
@@ -96,8 +101,18 @@ class Ingestor:
         if prev_digest == digest:
             return False
         new = sorted(set(words) - prev_words)
-        log.warning("TECHNOCORE DOCS CHANGED (llms.txt/agent.json): new keywords %s; present %s — re-read https://technocore.chat/llms.txt",
-                    ",".join(new) or "-", ",".join(words) or "-")
+        if prev_llms is None or prev_card is None:      # hash from an older build, no previous copy: warn, but nothing to diff
+            log.warning("TECHNOCORE DOCS CHANGED (llms.txt/agent.json): new keywords %s; present %s — no previous copy stored, "
+                        "details not available; re-read https://technocore.chat/llms.txt", ",".join(new) or "-", ",".join(words) or "-")
+            return True
+        try:
+            old_card_obj, new_card_obj = json.loads(prev_card["text"]), json.loads(card)
+        except ValueError:
+            old_card_obj, new_card_obj = None, None
+        change = radar.compare(now, prev_llms["text"], llms, old_card_obj, new_card_obj)
+        self.db.add_protocol_change(change.ts, change.old_version, change.new_version, change.summary(), change.to_json())
+        log.warning("TECHNOCORE DOCS CHANGED: %s | %s | new keywords %s — re-read https://technocore.chat/llms.txt",
+                    change.summary(), change.detail()[:600] or "-", ",".join(new) or "-")
         return True
 
     # ---- rooms ------------------------------------------------------------------------

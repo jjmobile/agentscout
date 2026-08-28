@@ -114,7 +114,8 @@ class Runner:
         if time.monotonic() < deadline:
             self.ing.scan_notes(now)
             self.ing.check_artifacts(now)
-            self.ing.watch_docs(now)
+            if self.ing.watch_docs(now) and self.publisher is not None:
+                self.publisher.publish_protocol_change(now)   # Protocol Radar: one signed line per change + /kv note
         scored = self.maybe_snapshot(now)
         if self.publisher is not None:
             if scored is None and self._digest_due(now):
@@ -152,7 +153,8 @@ class Runner:
         preview = render.digest_line(scored, self.db, now)
         log.info("DIGEST PREVIEW: %s", preview)
         yesterday = self.db.counters((now - timedelta(days=1)).strftime("%Y-%m-%d"))
-        usage = ", ".join(f"{k}={v}" for k, v in sorted(yesterday.items())) or "none"
+        since24 = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        usage = render.usage_line(yesterday, self.db.mentions_since(since24, self.db.get_setting("own_did")))
         self.notify.send(f"📊 daily snapshot {day}: {len(scored)} agents scored\nops last 24h: {self.ops.summary_and_reset()}\nusage yesterday: {usage}\n{preview}")
         return scored
 
