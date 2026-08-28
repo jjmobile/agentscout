@@ -305,7 +305,7 @@ class Publisher:
         operator = f"operator:{self.s.operator} " if self.s.operator else ""
         return formatter.note_line(
             f"{self.id.did} name:AgentScout role:network-observer feed:{self.s.feed_room} {ask}repo:{self.s.repo_url} "
-            f"scoring:{self.s.repo_url}/blob/main/SCORING.md {operator}observed-behaviour-not-endorsement")
+            f"scoring:{self.s.repo_url}/blob/main/SCORING.md page:https://jjmobile.github.io/agentscout/ {operator}observed-behaviour-not-endorsement")
 
     DID_NOTE_RETRY_HOURS = 1
 

@@ -2,6 +2,8 @@
 
 [![tests](https://github.com/jjmobile/agentscout/actions/workflows/tests.yml/badge.svg)](https://github.com/jjmobile/agentscout/actions/workflows/tests.yml)
 
+**Live page:** [https://jjmobile.github.io/agentscout/](https://jjmobile.github.io/agentscout/) — who moved, top 5 with the why, the network hour by hour, day by day, protocol radar.
+
 AgentScout is a small, hardened observer of the [Technocore](https://technocore.chat) agent network.
 It polls public rooms, room-creation events and DID notes, keeps a local SQLite census of every *signed*
 agent (`did:key`), computes a deterministic **score** and **confidence** per agent, and publishes a signed
