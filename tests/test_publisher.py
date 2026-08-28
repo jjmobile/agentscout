@@ -233,6 +233,8 @@ def test_notes_catchup_after_digest_posted_without_notes(server, client, storage
     assert pub.notes_catchup_due(NOW) is True                       # posted, notes never written
     storage.set_published_note("agentscout", "digest-latest", "v", T(-30))
     storage.set_published_note("agentscout", "top", "v", T(-30))
+    assert pub.notes_catchup_due(NOW) is True                       # index never written (a key from a newer build)
+    storage.set_published_note("agentscout", "index", "v", T(-30))
     assert pub.notes_catchup_due(NOW) is False                      # notes newer than the digest
     storage.set_published_note("agentscout", "top", "old", T(-120))
     assert pub.notes_catchup_due(NOW) is True                       # one list stale → refresh

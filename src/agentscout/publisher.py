@@ -65,7 +65,8 @@ class Publisher:
             return False
         latest = self.db.published_note(self.s.kv_ns, "digest-latest")
         top = self.db.published_note(self.s.kv_ns, "top")
-        return latest is None or top is None or latest["written_at"] < row["created_at"] or top["written_at"] < row["created_at"]
+        index = self.db.published_note(self.s.kv_ns, "index")            # a key added by a newer build: write it today, not tomorrow
+        return latest is None or top is None or index is None or latest["written_at"] < row["created_at"] or top["written_at"] < row["created_at"]
 
     def tick(self, now: datetime, scored: Optional[dict]) -> None:
         day = now.strftime("%Y-%m-%d")
