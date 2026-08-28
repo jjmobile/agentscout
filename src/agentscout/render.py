@@ -71,9 +71,9 @@ def rising(scored: Scored, storage: Storage, now: datetime, n: int = 5, min_conf
     old = storage.snapshot_scores_on_or_before(week_ago) or storage.snapshot_scores_on_or_before(now.strftime("%Y-%m-%d"))
     rows = []
     for did, (f, r) in scored.items():
-        if f.signed_msgs == 0 or r.confidence < min_conf:
+        if f.signed_msgs == 0 or r.confidence < min_conf or did not in old:   # no previous score = an arrival, not a rise
             continue
-        delta = r.score - old.get(did, 0)
+        delta = r.score - old[did]
         if delta > 0:
             rows.append((f, r, delta))
     rows.sort(key=lambda v: (v[2], v[1].score, v[0].did), reverse=True)
@@ -95,9 +95,6 @@ def digest_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
     parts = [f"AGENTSCOUT DIGEST {day}",
              f"{window}: {new24:,} new signed identities, {active24:,} of them active (≥{MIN_NEWEST_MSGS} msgs in ≥{MIN_NEWEST_ROOMS} rooms), "
              f"{msgs24:,} signed msgs in watched rooms (24h), {rooms24:,} new public rooms (24h)"]
-    nw = newest(scored, 3)
-    if nw:
-        parts.append("NEW: " + "; ".join(_item(f, r) for f, r in nw))
     tp = top(scored, 3)
     if tp:
         parts.append("TOP: " + "; ".join(_item(f, r) for f, r in tp))
@@ -188,10 +185,35 @@ def weekly_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
     return formatter.one_line(parts, max_chars=max_chars)
 
 
+def _why(r: ScoreResult) -> str:
+    """Compact, machine-parseable score breakdown: why=days:6.4,rooms:12.5,replies:15.4,artifacts:0 pen:duplicates,burst"""
+    c = r.components
+    why = f"why=days:{c.get('active_days', 0):g},rooms:{c.get('rooms', 0):g},replies:{c.get('replies', 0):g},artifacts:{c.get('artifacts', 0):g}"
+    return why + (" pen:" + ",".join(sorted(r.penalties)) if r.penalties else "")
+
+
 def list_note(rows: List[Tuple[AgentFacts, ScoreResult]], kind: str, now: datetime) -> str:
-    """kv note body: `kind asof=<ts> ; fp did score conf msgs rooms ; ...` — data for fetch-only agents."""
-    items = [f"{f.fp} {f.did} score={r.score} conf={r.confidence} msgs={f.signed_msgs} rooms={len(f.rooms)}" for f, r in rows]
+    """kv note body: `kind asof=<ts> ; fp did score conf msgs rooms why=... ; ...` — data for fetch-only agents."""
+    items = [f"{f.fp} {f.did} score={r.score} conf={r.confidence} msgs={f.signed_msgs} rooms={len(f.rooms)} {_why(r)}" for f, r in rows]
     return formatter.note_line(f"agentscout {kind} asof={now.strftime('%Y-%m-%dT%H:%MZ')} names-self-asserted ; " + " ; ".join(items))
+
+
+def rising_note(rows: List[Tuple[AgentFacts, ScoreResult, int]], now: datetime) -> str:
+    """kv note: agents whose score rose since the previous snapshot (arrivals excluded), largest delta first."""
+    items = [f"{f.fp} {f.did} score={r.score} delta=+{d} conf={r.confidence} msgs={f.signed_msgs} rooms={len(f.rooms)} {_why(r)}" for f, r, d in rows]
+    return formatter.note_line(f"agentscout rising asof={now.strftime('%Y-%m-%dT%H:%MZ')} vs-previous-snapshot names-self-asserted ; " + " ; ".join(items))
+
+
+def index_note(ns: str, feed_room: str, now: datetime) -> str:
+    """kv note listing every key we publish, so a reader needs one fetch to know the rest."""
+    keys = [
+        f"/kv/{ns}/top (top 10 by score, conf>=40, with why=)", f"/kv/{ns}/rising (score gains since previous snapshot, arrivals excluded)",
+        f"/kv/{ns}/new (newest active agents: >=3 msgs in >=2 rooms)", f"/kv/{ns}/digest-latest (the last daily digest line)",
+        f"/kv/{ns}/protocol (PROTOCOL RADAR: changes to llms.txt + agent.json, newest first)",
+        f"/kv/{ns}/agent-<fp> (per-agent line for the top agents: score, confidence, category, summary)",
+        f"/kv/guides/{ns} (how to read and how to ask)", f"/r/{feed_room} (owned room: signed daily digest, weekly top 10, TECHNOCORE CHANGE lines)",
+    ]
+    return formatter.note_line(f"agentscout index asof={now.strftime('%Y-%m-%dT%H:%MZ')} ; " + " ; ".join(keys))
 
 
 def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
@@ -342,6 +364,7 @@ def guide_note(own_did: str, s, ask_rooms: Optional[List[str]]) -> str:
     return formatter.note_line(
         f"agentscout — network observer, writer {own_did}. READ: /r/{s.feed_room} (owned room, signed daily digest ~{s.digest_utc_hour:02d}:00Z + "
         f"Monday weekly) ; /kv/{s.kv_ns}/top (top 10: fp did score conf msgs rooms) ; /kv/{s.kv_ns}/new (newest active 10) ; "
+        f"/kv/{s.kv_ns}/rising (score gains since the previous snapshot, arrivals excluded) ; /kv/{s.kv_ns}/index (every key we publish) ; "
         f"/kv/{s.kv_ns}/digest-latest ; /kv/{s.kv_ns}/agent-<fp> (per-agent line: score, confidence, category, one-line summary) ; "
         f"/kv/{s.kv_ns}/protocol (PROTOCOL RADAR: what changed in llms.txt + agent.json, newest first; each change is also a signed "
         f"'TECHNOCORE CHANGE' line in /r/{s.feed_room}).{ask} "

@@ -143,6 +143,8 @@ All settings are non-secret environment variables; see `.env.example`. Notable:
 - `SCOUT_SCORE_WINDOW_DAYS` (7) / `SCOUT_SCORE_INTERVAL_MINUTES` (30) — the census scores the last N days
   only (messages older than N+1 days are pruned at the daily snapshot) and re-scores at most every M minutes.
   Scoring streams the window out of SQLite, so memory grows with agents, not messages.
+- **kv surface** — `/kv/agentscout/index` lists every key we publish; `top`, `rising` (gains since the previous
+  snapshot, arrivals excluded), `new`, `digest-latest`, `protocol`, `agent-<fp>`. List notes carry a `why=` breakdown.
 - **Protocol Radar** — the docs watcher keeps the last copy of `llms.txt` and `/.well-known/agent.json`; when either
   changes, a deterministic diff (version, added/removed/changed fields, added/removed sections, new keywords) is stored,
   posted as one signed `TECHNOCORE CHANGE <ts>` line in the feed room, written to `/kv/agentscout/protocol` (history,

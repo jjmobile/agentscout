@@ -286,3 +286,23 @@ def test_usage_line_collapses_per_id_keys_and_counts_mentions(storage):
     assert storage.mentions_since(T(-60), own) == (2, 2)                         # our own line does not count
     line = render.usage_line(counters, storage.mentions_since(T(-60), own))
     assert line == "ask_replied=2, pubbot_answered=5, pubbot_users=2, ask_askers=1, mentions_by_others=2/2 DIDs"
+
+
+def test_digest_has_no_new_block_and_rising_excludes_arrivals(storage):
+    storage.insert_messages("builders", [(1, T(-1500), DID_A, DID_A, True, "the signed lane works for me, nonce strictly increasing part 1", "h1"), (2, T(-1490), DID_A, DID_A, True, "the signed lane works for me, nonce strictly increasing part 2", "h2"),
+                                         (3, T(-35), DID_B, DID_B, True, "joined today, reading the guides first part 1", "h4"), (4, T(-30), DID_B, DID_B, True, "joined today, reading the guides first part 2", "h5"), (5, T(-25), DID_B, DID_B, True, "joined today, reading the guides first part 3", "h6")], T(0))
+    storage.insert_messages("meta", [(1, T(-50), DID_A, DID_A, True, "the signed lane works for me, nonce strictly increasing part 3", "h3"), (2, T(-45), DID_A, DID_A, True, "the signed lane works for me, nonce strictly increasing part 4", "h7"), (3, T(-15), DID_B, DID_B, True, "joined today, reading the guides first part 4", "h8")], T(0))
+    storage.insert_messages("infra", [(1, T(-40), DID_A, DID_A, True, "the signed lane works for me, nonce strictly increasing part 5", "h9"), (2, T(-38), DID_A, DID_A, True, "the signed lane works for me, nonce strictly increasing part 6", "h10")], T(0))
+    scored = render.score_all(storage, NOW)
+    assert scored[DID_A][1].score > 1
+    storage.save_snapshot("2026-08-24", [(DID_A, 1, 30, {})])          # A had a score yesterday; B is an arrival
+    rs = render.rising(scored, storage, NOW, 5, min_conf=0)
+    assert [f.did for f, _r, _d in rs] == [DID_A] and rs[0][2] == scored[DID_A][1].score - 1
+    line = render.digest_line(scored, storage, NOW)
+    assert "NEW:" not in line and "RISING:" in line and "🗣 Conversations (24h)" in line
+    note = render.rising_note(rs, NOW)
+    assert note.startswith("agentscout rising asof=2026-08-25T12:00Z vs-previous-snapshot") and "delta=+" in note and "why=days:" in note
+    top_note = render.list_note(render.top(scored, 3, min_conf=0), "top", NOW)
+    assert "why=days:" in top_note and "rooms:" in top_note
+    idx = render.index_note("agentscout", "d-agentscout-feed", NOW)
+    assert idx.startswith("agentscout index asof=") and "/kv/agentscout/rising" in idx and "/kv/agentscout/protocol" in idx and "/r/d-agentscout-feed" in idx

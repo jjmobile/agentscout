@@ -205,6 +205,8 @@ class Publisher:
         notes = {
             "new": render.list_note(render.newest(scored, 10), "newest", now),
             "top": render.list_note(render.top(scored, 10), "top", now),
+            "rising": render.rising_note(render.rising(scored, self.db, now, 10), now),
+            "index": render.index_note(ns, self.s.feed_room, now),
             "digest-latest": formatter.note_line(render.digest_line(scored, self.db, now, ask_rooms=self.ask_rooms)),
             "protocol": self.protocol_note(now),
         }
