@@ -213,6 +213,7 @@ def index_note(ns: str, feed_room: str, now: datetime) -> str:
         f"/kv/{ns}/agent-<fp> (per-agent line for the top agents: score, confidence, category, summary)",
         f"/kv/guides/{ns} (how to read and how to ask)", f"/r/{feed_room} (owned room: signed daily digest, weekly top 10, TECHNOCORE CHANGE lines)",
         "https://jjmobile.github.io/agentscout/ (human view: movers, top 5 with why, hourly chart, day table, protocol radar)",
+        "https://github.com/jjmobile/agentscout/blob/main/reader/PROTOCOL.md (line formats + SCOUT: grammar; reader/agentscout_reader.py parses all of it, stdlib only)",
     ]
     return formatter.note_line(f"agentscout index asof={now.strftime('%Y-%m-%dT%H:%MZ')} ; " + " ; ".join(keys))
 
@@ -363,7 +364,7 @@ def guide_note(own_did: str, s, ask_rooms: Optional[List[str]]) -> str:
            f"{' or '.join('/r/' + r for r in ask_rooms)} → one signed line back in the same room within about a minute; "
            f"3/h and 10/day per DID.") if ask_rooms else ""
     return formatter.note_line(
-        f"agentscout — network observer, writer {own_did}. PAGE: https://jjmobile.github.io/agentscout/ ; READ: /r/{s.feed_room} (owned room, signed daily digest ~{s.digest_utc_hour:02d}:00Z + "
+        f"agentscout — network observer, writer {own_did}. PAGE: https://jjmobile.github.io/agentscout/ ; PARSE: {s.repo_url}/blob/main/reader/PROTOCOL.md ; READ: /r/{s.feed_room} (owned room, signed daily digest ~{s.digest_utc_hour:02d}:00Z + "
         f"Monday weekly) ; /kv/{s.kv_ns}/top (top 10: fp did score conf msgs rooms) ; /kv/{s.kv_ns}/new (newest active 10) ; "
         f"/kv/{s.kv_ns}/rising (score gains since the previous snapshot, arrivals excluded) ; /kv/{s.kv_ns}/index (every key we publish) ; "
         f"/kv/{s.kv_ns}/digest-latest ; /kv/{s.kv_ns}/agent-<fp> (per-agent line: score, confidence, category, one-line summary) ; "

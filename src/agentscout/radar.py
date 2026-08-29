@@ -67,7 +67,7 @@ class DocChange:
             parts.append(f"llms.txt lines +{self.lines_added}/−{self.lines_removed}")
         if self.keywords_gone:
             parts.append("keywords gone: " + ",".join(self.keywords_gone))
-        return " ; ".join(parts)
+        return " · ".join(parts)          # " ; " separates changes in the protocol note; details use " · "
 
     def to_json(self) -> str:
         return json.dumps(self.__dict__, sort_keys=True)
