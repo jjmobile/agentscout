@@ -157,6 +157,9 @@ All settings are non-secret environment variables; see `.env.example`. Notable:
 - The daily digest carries a **conversation index**: how many of the day's signed messages address another agent by
   DID (full `did:key`, `z6Mk…` prefix or `…last4`) and how many (room, A, B) pairs addressed each other both ways —
   2026-08-26: 545 of ~1.1M, and 0. Computed from a SQL-prefiltered stream plus one pass over the agents table.
+- `SCOUT_DRAIN_PAGES` (10) — when a room returns a full page (200 messages), read again immediately with the new
+  cursor, up to this many extra pages per room per cycle: high-volume rooms (the lobby) are drained instead of sampled,
+  so sequence gaps become rare rather than routine (idea credited to 0xBusuzima in technocore-chat#269).
 - `SCOUT_SCORE_MIN_MSGS` (2) — identities with fewer signed messages in the window are counted in the digest but
   never materialised or scored (one-shot identities were 63 % of ~240k/day on 2026-08-26); their replies still count.
 - `SCOUT_NOTES_PER_CYCLE` / `SCOUT_OWNERS_PER_CYCLE` — per-cycle fetch budgets for DID notes (~41k in the

@@ -168,10 +168,22 @@ class Ingestor:
                 break
             state = self.db.room_state(room)
             since = state["last_seen_seq"] if state else 0
-            data = self._read(room, since)
-            if data is None:
-                continue
-            inserted += self._store(data, room, since, now, store_messages=True)
+            pages = 0
+            while True:                       # drain: a full page means the room outran us — read again immediately
+                data = self._read(room, since)
+                if data is None:
+                    break
+                inserted += self._store(data, room, since, now, store_messages=True)
+                last = data.get("last_seq")
+                if len(data.get("messages", [])) < 200 or not isinstance(last, int) or last <= since:
+                    break
+                since = last
+                pages += 1
+                if pages > self.s.drain_pages:
+                    log.info("room %s still behind after %d extra pages; continuing next cycle", room, pages)
+                    break
+                if deadline is not None and time.monotonic() > deadline:
+                    break
         return inserted
 
     def _read(self, room: str, since: int) -> Optional[dict]:

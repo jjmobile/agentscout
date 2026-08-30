@@ -148,3 +148,32 @@ def test_sharded_did_notes_are_discovered_without_a_message(server, settings, cl
     assert storage.get_setting("did_namespace_keys") == "1"
     ing.scan_notes(NOW)                              # sweep finished: no further shard listing until the next refresh
     assert ing._shard_cursor == DID_SHARDS
+
+
+def test_full_pages_are_drained_until_caught_up(server, settings, client, storage):
+    ing = setup(server, settings, client, storage)
+    ing.poll_events(NOW)
+    ing.poll_rooms(NOW)                                                     # cursors at lobby=12
+    page1 = [msg(13 + i, T(-30), DID_A, f"catchup one {i}", i + 10) for i in range(200)]
+    page2 = [msg(213 + i, T(-20), DID_B, f"catchup two {i}", i + 300) for i in range(200)]
+    page3 = [msg(413, T(-10), DID_A, "caught up now", 999)]
+    server.route_sequence("/r/lobby?format=json&limit=200&since=12", [(200, None, room_json("lobby", page1, first_seq=13, last_seq=212))])
+    server.route_sequence("/r/lobby?format=json&limit=200&since=212", [(200, None, room_json("lobby", page2, first_seq=213, last_seq=412))])
+    server.route_sequence("/r/lobby?format=json&limit=200&since=412", [(200, None, room_json("lobby", page3, first_seq=413, last_seq=413))])
+    inserted = ing.poll_rooms(NOW + timedelta(minutes=1))
+    assert inserted == 401                                                   # 200 + 200 + 1 in one cycle, no waiting
+    assert storage.room_state("lobby")["last_seen_seq"] == 413
+    assert storage.conn.execute("SELECT COUNT(*) FROM sequence_gaps").fetchone()[0] == 0
+
+
+def test_drain_respects_the_page_cap(server, settings, client, storage):
+    settings.drain_pages = 1
+    ing = setup(server, settings, client, storage)
+    ing.poll_events(NOW)
+    ing.poll_rooms(NOW)
+    page1 = [msg(13 + i, T(-30), DID_A, f"first {i}", i + 10) for i in range(200)]
+    page2 = [msg(213 + i, T(-20), DID_B, f"second {i}", i + 300) for i in range(200)]
+    server.route_sequence("/r/lobby?format=json&limit=200&since=12", [(200, None, room_json("lobby", page1, first_seq=13, last_seq=212))])
+    server.route_sequence("/r/lobby?format=json&limit=200&since=212", [(200, None, room_json("lobby", page2, first_seq=213, last_seq=412))])
+    assert ing.poll_rooms(NOW + timedelta(minutes=1)) == 400                 # cap 1 extra page: exactly two reads
+    assert storage.room_state("lobby")["last_seen_seq"] == 412

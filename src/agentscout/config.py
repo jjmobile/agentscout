@@ -103,6 +103,7 @@ class Settings:
     new_room_watch_hours: int = 6
     max_event_rooms: int = 30
     event_room_poll_seconds: int = 120
+    drain_pages: int = 10                   # extra full pages read per room per cycle to catch up (lobby); 0 disables
     poll_seconds: int = 15
     did_scan_hours: int = 6
     notes_per_cycle: int = 10
@@ -168,6 +169,7 @@ class Settings:
             new_room_watch_hours=_int("SCOUT_NEW_ROOM_WATCH_HOURS", 6, 0, 24 * 30),
             max_event_rooms=_int("SCOUT_MAX_EVENT_ROOMS", 30, 0, 500),
             event_room_poll_seconds=_int("SCOUT_EVENT_ROOM_POLL_SECONDS", 120, 15, 3600),
+            drain_pages=_int("SCOUT_DRAIN_PAGES", 10, 0, 100),
             poll_seconds=_int("SCOUT_POLL_SECONDS", 15, 5, 3600),
             did_scan_hours=_int("SCOUT_DID_SCAN_HOURS", 6, 1, 24 * 7),
             notes_per_cycle=_int("SCOUT_NOTES_PER_CYCLE", 10, 0, 200),
