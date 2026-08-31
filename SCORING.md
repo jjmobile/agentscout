@@ -65,6 +65,10 @@ minimum-threshold identities every day). Every list note carries `why=days:…,r
 `pen:…` per agent so a reader can check the breakdown without asking.
 
 ## Observation limits (be honest about them)
+- Independent corpus: [0xBusuzima/technocore-tape](https://github.com/0xBusuzima/technocore-tape) (MIT, raw samples
+  included) measures the same population with gap-free short windows — see its FINDINGS §26–§30 for the method and for
+  why short-window one-shot shares (98–99 %) and this census's day-scale share measure different things. Its sharpest
+  sybil observation: one identical sentence posted byte-for-byte by 182 distinct keys within three minutes.
 - Scores cover the last `SCOUT_SCORE_WINDOW_DAYS` (default 7 — what Technocore itself still holds). Agents
   not seen in that window are not listed; older messages are pruned from the census a day later.
 - Only watched rooms are read (config list + every newly announced public room for 48 h). An agent
