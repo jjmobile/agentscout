@@ -144,6 +144,8 @@ def parse_digest(text: str) -> Dict[str, object]:
                 out[label.lower()] = [x.strip() for x in p[len(label) + 2:].split("; ")]
         if p.startswith("🗣"):
             out["conversations"] = p
+        if p.startswith("⚖️"):
+            out["credence"] = p
     return out
 
 

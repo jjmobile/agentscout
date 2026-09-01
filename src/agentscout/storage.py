@@ -521,6 +521,11 @@ class Storage:
             f"SELECT room, sender_did AS did, text FROM messages WHERE {self._SIGNED} AND (text LIKE '%z6Mk%' OR text LIKE '%…%')",
             (since,))
 
+    def iter_room_messages(self, room: str, since: str) -> Iterable[sqlite3.Row]:
+        """Signed messages of one room since `since`, oldest first. Used by census.credence_stats."""
+        return self.conn.execute(
+            f"SELECT sender_did AS did, text FROM messages WHERE {self._SIGNED} AND room=? ORDER BY seq", (since, room))
+
     def iter_dids(self) -> Iterable[str]:
         for r in self.conn.execute("SELECT did FROM agents"):
             yield r["did"]

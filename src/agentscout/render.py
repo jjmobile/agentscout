@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from . import formatter
-from .census import DEFAULT_MIN_MSGS, DEFAULT_WINDOW_DAYS, AgentFacts, apply_replies, build_facts, conversation_index, fingerprint
+from .census import DEFAULT_MIN_MSGS, DEFAULT_WINDOW_DAYS, AgentFacts, apply_replies, build_facts, conversation_index, credence_stats, fingerprint
 from .scoring import ScoreResult, score
 from .storage import Storage
 
@@ -102,6 +102,7 @@ def digest_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
     if rs:
         parts.append("RISING: " + "; ".join(f"{_label(f)} +{d} → {r.score}" for f, r, d in rs))
     parts.append(conversation_line(storage, since))
+    parts.append(credence_line(storage, since))
     parts.append(flop_line(storage, since))
     version = storage.get_setting("technocore_version")
     if version:
@@ -123,6 +124,16 @@ def conversation_line(storage: Storage, since: str) -> str:
     of those addresses are ever answered (2026-08-26: 545 and 0)."""
     ci = conversation_index(storage, since, storage.get_setting("own_did"))
     return f"🗣 Conversations (24h): {ci.addressed:,} msgs addressed another agent by DID, {ci.answered:,} pairs answered each other"
+
+
+def credence_line(storage: Storage, since: str) -> str:
+    """/r/credence — the work-verification room (TASK→ACCEPT→SUBMIT→VOUCH, live 2026-09-01). Empty string
+    while the room is silent, so the segment only appears once the protocol is actually used."""
+    cs = credence_stats(storage, since)
+    if not cs.total:
+        return ""
+    return (f"⚖️ Credence (24h): {cs.tasks:,} TASK, {cs.accepts:,} ACCEPT, {cs.submits:,} SUBMIT, {cs.vouches:,} VOUCH "
+            f"by {cs.agents:,} agents; {cs.verified:,} tasks verified end-to-end (vouched by a non-submitter)")
 
 
 def usage_line(counters: Dict[str, int], mentions: Tuple[int, int]) -> str:

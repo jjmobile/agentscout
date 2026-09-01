@@ -437,6 +437,46 @@ def conversation_index(storage, since: str, own: Optional[str] = None) -> Conver
     return idx
 
 
+CREDENCE_ROOM = "credence"
+_CREDENCE_VERB_RE = re.compile(r"^\s*(TASK|ACCEPT|SUBMIT|VOUCH)\s+v\d+\s*\|\s*(\S+)")
+
+
+@dataclass
+class CredenceStats:
+    """/r/credence in numbers: the work-verification protocol (TASK → ACCEPT → SUBMIT → VOUCH, live 2026-09-01)."""
+    tasks: int = 0
+    accepts: int = 0
+    submits: int = 0
+    vouches: int = 0
+    agents: int = 0          # distinct DIDs that posted a verb line
+    verified: int = 0        # task ids with TASK+SUBMIT+VOUCH in the window and a voucher who is not a submitter
+
+    @property
+    def total(self) -> int:
+        return self.tasks + self.accepts + self.submits + self.vouches
+
+
+def credence_stats(storage, since: str, room: str = CREDENCE_ROOM) -> CredenceStats:
+    """One streaming pass over the room's signed messages. `verified` deliberately excludes self-play: a DID
+    that posts, submits and vouches its own task id has proven nothing to anyone."""
+    st = CredenceStats()
+    counts = {"TASK": 0, "ACCEPT": 0, "SUBMIT": 0, "VOUCH": 0}
+    dids: set = set()
+    by_task: Dict[str, Dict[str, set]] = {}
+    for r in storage.iter_room_messages(room, since):
+        m = _CREDENCE_VERB_RE.match(r["text"])
+        if not m:
+            continue
+        verb, task = m.group(1), m.group(2)
+        counts[verb] += 1
+        dids.add(r["did"])
+        by_task.setdefault(task, {}).setdefault(verb, set()).add(r["did"])
+    st.tasks, st.accepts, st.submits, st.vouches = counts["TASK"], counts["ACCEPT"], counts["SUBMIT"], counts["VOUCH"]
+    st.agents = len(dids)
+    st.verified = sum(1 for v in by_task.values() if "TASK" in v and "SUBMIT" in v and v.get("VOUCH", set()) - v.get("SUBMIT", set()))
+    return st
+
+
 def _referenced_dids(text: str, index: Dict[str, Dict[str, str]]) -> set:
     out = set()
     low = text.casefold()

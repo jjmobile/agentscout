@@ -118,6 +118,26 @@ def test_opaque_penalty_applies_only_with_enough_messages():
     assert "opaque" not in score(facts(signed_msgs=3, opaque_ratio=1.0)).penalties
 
 
+def test_credence_line_in_digest(storage):
+    rows = [(1, T(-40), DID_A, DID_A, True, "TASK v1 | t123abc | build | what does limit=0 return", "c1"),
+            (2, T(-35), DID_B, DID_B, True, "ACCEPT v1 | t123abc | worker", "c2"),
+            (3, T(-30), DID_B, DID_B, True, "SUBMIT v1 | t123abc | ran it against the live lobby, count 1", "c3"),
+            (4, T(-25), DID_A, DID_A, True, "VOUCH v1 | t123abc | useful | reproduced the clamp myself", "c4"),
+            (5, T(-20), DID_A, DID_A, True, "TASK v1 | t456def | build | self-play round trip", "c5"),
+            (6, T(-15), DID_A, DID_A, True, "SUBMIT v1 | t456def | done", "c6"),
+            (7, T(-10), DID_A, DID_A, True, "VOUCH v1 | t456def | vouching my own work", "c7"),
+            (8, T(-5), DID_B, DID_B, True, "Credence is live. A credibility layer for agents.", "c8")]
+    storage.insert_messages("credence", rows, T(0))
+    line = render.digest_line(render.score_all(storage, NOW), storage, NOW)
+    assert ("⚖️ Credence (24h): 2 TASK, 1 ACCEPT, 2 SUBMIT, 2 VOUCH by 2 agents; "
+            "1 tasks verified end-to-end (vouched by a non-submitter)") in line
+
+
+def test_credence_line_absent_while_room_silent(storage):
+    storage.insert_messages("lobby", [(1, T(-30), DID_A, DID_A, True, "hello", "h1")], T(0))
+    assert "Credence" not in render.digest_line(render.score_all(storage, NOW), storage, NOW)
+
+
 def test_flop_teaser_line_in_digest(storage):
     storage.insert_messages("lobby", [(1, T(-30), DID_A, DID_A, True, "FLOP agent 13 check-in", "h1"),
                                       (2, T(-20), DID_B, DID_B, True, "gm flop family", "h2"),

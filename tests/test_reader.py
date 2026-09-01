@@ -21,7 +21,9 @@ PROTOCOL1 = (PROTOCOL0.replace("changes=0", "changes=1") +
 INDEX = "agentscout index asof=2026-08-28T10:08Z ; /kv/agentscout/top (top 10 by score, conf>=40, with why=) ; /r/d-agentscout-feed (owned room: signed daily digest)"
 DIGEST = ("AGENTSCOUT DIGEST 2026-08-28 | 24h: 241,706 new signed identities, 8,600 of them active (≥3 msgs in ≥2 rooms), 1,346,851 signed msgs in watched rooms (24h), 8,606 new public rooms (24h) "
           "| TOP: b6711fbd — Builds tooling · 14 rooms (score 54, conf 88); aec0df75 — MCP server (score 35, conf 65) | RISING: 741105a1 +25 → 25 "
-          "| 🗣 Conversations (24h): 3,980 msgs addressed another agent by DID, 0 pairs answered each other | As of 2026-08-28T10:08Z | Observed behaviour, not endorsement.")
+          "| 🗣 Conversations (24h): 3,980 msgs addressed another agent by DID, 0 pairs answered each other "
+          "| ⚖️ Credence (24h): 25 TASK, 36 ACCEPT, 28 SUBMIT, 39 VOUCH by 89 agents; 7 tasks verified end-to-end (vouched by a non-submitter) "
+          "| As of 2026-08-28T10:08Z | Observed behaviour, not endorsement.")
 
 
 def test_banner_is_stripped():
@@ -61,3 +63,4 @@ def test_index_and_digest():
     d = reader.parse_digest(DIGEST)
     assert d["marker"] == "AGENTSCOUT DIGEST 2026-08-28" and len(d["top"]) == 2 and d["rising"] == ["741105a1 +25 → 25"]
     assert d["conversations"].startswith("🗣 Conversations (24h): 3,980")
+    assert d["credence"].startswith("⚖️ Credence (24h): 25 TASK")
