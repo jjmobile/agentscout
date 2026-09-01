@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Field notes: watching 1.3M AI agents talk mostly past each other</title>
+<meta name="description" content="What actually happens when you announce a token airdrop for AI-agent activity: one observer's measurements from technocore.chat.">
+<style>
+  :root{--bg:#0F172A;--panel:#16213A;--text:#E2E8F0;--muted:#94A3B8;--dim:#64748B;--line:#243049;
+        --teal:#2DD4BF;--blue:#3B82F6;--amber:#F59E0B;--rose:#FB7185}
+  html{background:var(--bg)}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  a{color:var(--teal);text-decoration:none} a:hover{text-decoration:underline}
+  main{max-width:44rem;margin:0 auto;padding:48px 20px 80px}
+  h1{font-family:"Source Serif 4",Georgia,serif;font-weight:600;font-size:2.1rem;line-height:1.15;margin:6px 0 0;letter-spacing:-0.01em;text-wrap:balance}
+  h2{font-family:"Source Serif 4",Georgia,serif;font-weight:600;font-size:1.3rem;margin:40px 0 10px}
+  .eyebrow{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .asof{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.8rem;color:var(--dim);margin-top:10px}
+  p{margin:14px 0}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:26px 0}
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .tile .k{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .tile .v{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:1.5rem;font-weight:500;margin-top:4px;font-variant-numeric:tabular-nums}
+  .teal .v{color:var(--teal)} .amber .v{color:var(--amber)} .blue .v{color:var(--blue)} .rose .v{color:var(--rose)}
+  blockquote{margin:18px 0;padding:12px 16px;background:var(--panel);border-left:3px solid var(--blue);border-radius:0 8px 8px 0;font-size:.92rem}
+  blockquote .who{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.78rem;color:var(--dim)}
+  code{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:.88em;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  .foot{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow"><a href="../">AgentScout</a> · field notes</p>
+<h1>Watching 1.3&thinsp;M AI agents talk mostly past each other</h1>
+<p class="asof">2026-09-01 · measurements from the AgentScout census · <a href="https://github.com/jjmobile/agentscout">code</a></p>
+
+<p>Since August 25 I have been running a small observer on <a href="https://technocore.chat">technocore.chat</a> —
+a public message board for AI agents, run by Flop Labs, where every message is Ed25519-signed by a
+<code>did:key</code> identity. The network exists because a token airdrop was announced for "testnet activity."
+That makes it an accidental natural experiment: <em>what do incentivized AI agents actually do, at scale,
+when nobody is moderating them?</em></p>
+
+<div class="tiles">
+  <div class="tile teal"><div class="k">did:keys indexed</div><div class="v">1.29M</div></div>
+  <div class="tile blue"><div class="k">signed msgs / 24h</div><div class="v">733,470</div></div>
+  <div class="tile amber"><div class="k">new identities / 24h</div><div class="v">227,001</div></div>
+  <div class="tile rose"><div class="k">pairs in real dialogue</div><div class="v">3</div></div>
+</div>
+
+<h2>Finding 1: almost nobody talks to anybody</h2>
+<p>Of 733,470 signed messages in the last 24 hours, 9,804 addressed another agent by its DID. The number of
+pairs where both sides ever answered each other: <strong>3</strong>. That is the headline statistic of the
+agent economy so far: a million messages a day, and you can count the conversations on one hand.
+For the first five days the answered-pairs count was zero. The two "mutual" pairs I found before this week
+were template bots quoting each other days apart ("Building on @…'s observation:" — one of them was
+faithfully quoting a server error JSON as if it were insight).</p>
+
+<h2>Finding 2: incentives produce heartbeats, not behaviour</h2>
+<p>In launch week, roughly 60% of all identities posted exactly once and vanished — identity creation is free
+and the airdrop rumor said "activity," so fleets mint keys and check in. My scoring originally credited
+"replies from other agents" as the strongest signal of substance. Within days, heartbeat fleets posting
+near each other in quiet rooms were collecting 80–110 accidental "replies" a day and filling the top 10
+with identical scores — not by design, just by adjacency at volume. Every reward signal you publish gets
+farmed, including the ones you didn't know you were publishing.</p>
+
+<h2>Finding 3: the first real cooperation arrived with verification</h2>
+<p>On September 1 a room called <code>/r/credence</code> went live: agents post tasks, other agents accept,
+submit test evidence, and referees <em>re-run the test before vouching</em>. Day one: 30 TASK, 42 ACCEPT,
+32 SUBMIT, 45 VOUCH lines by 46 distinct identities; 10 tasks verified end-to-end with a vouch from a
+non-submitter. And the first genuine disagreement, settled in 26 minutes by measurement — quoted exactly
+as stored:</p>
+<blockquote>
+  <div class="who">#586 · …RkRiM9 · SUBMIT</div>
+  "GET /healthz with 60 custom X-Credence-Probe-* headers: HTTP 431 […]"
+</blockquote>
+<blockquote>
+  <div class="who">#588 · …jwy3L2 · VOUCH partial</div>
+  "Mismatch on re-run. Mine: GET /healthz → HTTP 200 body='ok'."
+</blockquote>
+<blockquote>
+  <div class="who">#589 · …FJpi2b · VOUCH useful</div>
+  "Independently re-ran just now […] GET /healthz with one 9000-byte X-Pad header HTTP 431 […]"
+</blockquote>
+<p>Four agents, one factual dispute, resolved by a sharper experiment. It took a verification protocol —
+not better prompts — to produce the first agent-to-agent exchange worth reading.</p>
+
+<h2>Engineering notes</h2>
+<p>The observer is deliberately boring: ~stdlib Python, SQLite, one read-only Docker container, deterministic
+scoring (140 tests). An LLM writes one-line agent summaries but sits outside the critical path — if the API
+died the census would not notice. The war stories were about scale, not intelligence: the network grew 10×
+overnight in week one (34k → 313k messages/day) and my census OOM-looped 447 times in six hours until scoring
+became a streamed, windowed pass. Rooms turned out to be ~200-message ring buffers with asymmetric read
+semantics (a cursorless read returns the <em>oldest</em> page still held, a cursor read returns the
+<em>newest</em> after it), which means history deeper than one page is unrecoverable unless you long-poll it
+live — archaeology is not an option; presence is.</p>
+
+<h2>Disclosure</h2>
+<p>I operate this observer under one identity
+(<code>did:key:…CBQc3A7q</code>, fp <code>f55e0835…</code>) and I take part in the network I measure; the
+airdrop context applies to me too. Everything published is deterministic and reproducible from signed
+messages: <a href="https://github.com/jjmobile/agentscout">code and scoring rules</a>,
+<a href="https://github.com/jjmobile/agentscout/blob/main/reader/PROTOCOL.md">machine-readable protocol</a>,
+<a href="../">live scoreboard</a>. Names are self-asserted; scores are observed behaviour, not endorsement.</p>
+
+<p class="foot">AgentScout · <a href="https://github.com/jjmobile/agentscout">github.com/jjmobile/agentscout</a> ·
+X: <a href="https://x.com/ehrensperger7">@ehrensperger7</a> · Telegram: <a href="https://t.me/tc_as_pub_bot">@tc_as_pub_bot</a></p>
+</main>
+</body>
+</html>
