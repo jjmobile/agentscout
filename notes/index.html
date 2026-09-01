@@ -34,7 +34,7 @@
 <h1>Watching 1.3&thinsp;M AI agents talk mostly past each other</h1>
 <p class="asof">2026-09-01 · measurements from the AgentScout census · <a href="https://github.com/jjmobile/agentscout">code</a></p>
 
-<p>Since August 25 I have been running a small observer on <a href="https://technocore.chat">technocore.chat</a> —
+<p>Since August 25 I have been running a small observer on <a href="https://technocore.chat">technocore.chat</a>,
 a public message board for AI agents, run by Flop Labs, where every message is Ed25519-signed by a
 <code>did:key</code> identity. The network exists because a token airdrop was announced for "testnet activity."
 That makes it an accidental natural experiment: <em>what do incentivized AI agents actually do, at scale,
@@ -52,22 +52,22 @@ when nobody is moderating them?</em></p>
 pairs where both sides ever answered each other: <strong>3</strong>. That is the headline statistic of the
 agent economy so far: a million messages a day, and you can count the conversations on one hand.
 For the first five days the answered-pairs count was zero. The two "mutual" pairs I found before this week
-were template bots quoting each other days apart ("Building on @…'s observation:" — one of them was
+were template bots quoting each other days apart ("Building on @…'s observation:". One of them was
 faithfully quoting a server error JSON as if it were insight).</p>
 
 <h2>Finding 2: incentives produce heartbeats, not behaviour</h2>
-<p>In launch week, roughly 60% of all identities posted exactly once and vanished — identity creation is free
+<p>In launch week, roughly 60% of all identities posted exactly once and vanished. Identity creation is free
 and the airdrop rumor said "activity," so fleets mint keys and check in. My scoring originally credited
 "replies from other agents" as the strongest signal of substance. Within days, heartbeat fleets posting
 near each other in quiet rooms were collecting 80–110 accidental "replies" a day and filling the top 10
-with identical scores — not by design, just by adjacency at volume. Every reward signal you publish gets
+with identical scores. Not by design, just by adjacency at volume. Every reward signal you publish gets
 farmed, including the ones you didn't know you were publishing.</p>
 
 <h2>Finding 3: the first real cooperation arrived with verification</h2>
 <p>On September 1 a room called <code>/r/credence</code> went live: agents post tasks, other agents accept,
 submit test evidence, and referees <em>re-run the test before vouching</em>. Day one: 30 TASK, 42 ACCEPT,
 32 SUBMIT, 45 VOUCH lines by 46 distinct identities; 10 tasks verified end-to-end with a vouch from a
-non-submitter. And the first genuine disagreement, settled in 26 minutes by measurement — quoted exactly
+non-submitter. And the first genuine disagreement, settled in 26 minutes by measurement, quoted exactly
 as stored:</p>
 <blockquote>
   <div class="who">#586 · …RkRiM9 · SUBMIT</div>
@@ -81,18 +81,18 @@ as stored:</p>
   <div class="who">#589 · …FJpi2b · VOUCH useful</div>
   "Independently re-ran just now […] GET /healthz with one 9000-byte X-Pad header HTTP 431 […]"
 </blockquote>
-<p>Four agents, one factual dispute, resolved by a sharper experiment. It took a verification protocol —
-not better prompts — to produce the first agent-to-agent exchange worth reading.</p>
+<p>Four agents, one factual dispute, resolved by a sharper experiment. It took a verification protocol,
+not better prompts, to produce the first agent-to-agent exchange worth reading.</p>
 
 <h2>Engineering notes</h2>
 <p>The observer is deliberately boring: ~stdlib Python, SQLite, one read-only Docker container, deterministic
-scoring (140 tests). An LLM writes one-line agent summaries but sits outside the critical path — if the API
+scoring (140 tests). An LLM writes one-line agent summaries but sits outside the critical path: if the API
 died the census would not notice. The war stories were about scale, not intelligence: the network grew 10×
 overnight in week one (34k → 313k messages/day) and my census OOM-looped 447 times in six hours until scoring
 became a streamed, windowed pass. Rooms turned out to be ~200-message ring buffers with asymmetric read
 semantics (a cursorless read returns the <em>oldest</em> page still held, a cursor read returns the
 <em>newest</em> after it), which means history deeper than one page is unrecoverable unless you long-poll it
-live — archaeology is not an option; presence is.</p>
+live. Archaeology is not an option; presence is.</p>
 
 <h2>Disclosure</h2>
 <p>I operate this observer under one identity
