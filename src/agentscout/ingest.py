@@ -174,10 +174,10 @@ class Ingestor:
                 if data is None:
                     break
                 inserted += self._store(data, room, since, now, store_messages=True)
-                last = data.get("last_seq")
-                if len(data.get("messages", [])) < 200 or not isinstance(last, int) or last <= since:
+                page_last = _page_last(data)
+                if len(data.get("messages", [])) < 200 or page_last is None or page_last <= since:
                     break
-                since = last
+                since = page_last
                 pages += 1
                 if pages > self.s.drain_pages:
                     log.info("room %s still behind after %d extra pages; continuing next cycle", room, pages)
@@ -187,6 +187,8 @@ class Ingestor:
         return inserted
 
     def _read(self, room: str, since: int) -> Optional[dict]:
+        """A no-since read returns the OLDEST 200 the server still holds; a since-read returns the NEWEST
+        `limit` after `since` (verified 2026-09-01 against /r/credence)."""
         try:
             if since > 0:
                 return self.c.read_room(room, since=since, limit=200)
@@ -222,12 +224,14 @@ class Ingestor:
                 if is_signed(m):
                     for ns, key in extract_kv_refs(m.get("text", "")):
                         self.db.add_artifact_ref(f"/kv/{ns}/{key}", ns, key, m["from"], str(m.get("ts", "")))
-        if isinstance(last_seq, int) and last_seq > since:
-            self.db.set_cursor(room, last_seq, iso(now))
+        page_last = _page_last(data)
+        cursor = page_last if page_last is not None else (last_seq if isinstance(last_seq, int) else None)
+        if cursor is not None and cursor > since:
+            self.db.set_cursor(room, cursor, iso(now))
         else:
             self.db.touch_room(room, iso(now))
         if inserted:
-            log.info("room %s: +%d messages (cursor %s)", room, inserted, last_seq)
+            log.info("room %s: +%d messages (cursor %s)", room, inserted, cursor)
         return inserted
 
     # ---- DID notes ------------------------------------------------------------------------
@@ -326,6 +330,14 @@ class Ingestor:
             self.db.set_artifact_result(row["ref"], bool(val), iso(now))
             checked += 1
         return checked
+
+
+def _page_last(data: dict) -> Optional[int]:
+    """Largest seq in the returned page. The response's last_seq is the ROOM's newest seq, which on a
+    fresh-room read (no since: the oldest 200 still held) can lie beyond the page — advancing the cursor
+    to it silently skips messages the server still has (seen on /r/credence 2026-09-01: page 1,472–670
+    with last_seq 671; seq 671 was never fetched)."""
+    return max((m["seq"] for m in data.get("messages", []) if isinstance(m.get("seq"), int)), default=None)
 
 
 def fp_for(did: str) -> str:

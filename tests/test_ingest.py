@@ -166,6 +166,19 @@ def test_full_pages_are_drained_until_caught_up(server, settings, client, storag
     assert storage.conn.execute("SELECT COUNT(*) FROM sequence_gaps").fetchone()[0] == 0
 
 
+def test_fresh_room_backlog_page_does_not_jump_to_room_tail(server, settings, client, storage):
+    """/r/credence 2026-09-01: a room joined late holds its pinned first message plus a ~200-message ring;
+    the first (no-since) page is the oldest 200 still held, with last_seq pointing beyond the page. The
+    drain cursor must follow the page, not the room tail, or the in-between messages are silently skipped."""
+    ing = setup(server, settings, client, storage)
+    page1 = [msg(1, T(-90), DID_A, "room is live", 1)] + [msg(300 + i, T(-30), DID_B, f"ring {i}", i + 10) for i in range(199)]
+    server.route("/r/lobby?format=json&limit=200", body=room_json("lobby", page1, first_seq=1, last_seq=500))
+    server.route("/r/lobby?format=json&limit=200&since=498",
+                 body=room_json("lobby", [msg(499, T(-5), DID_A, "tail 1", 900), msg(500, T(-4), DID_B, "tail 2", 901)], first_seq=499, last_seq=500))
+    assert ing.poll_rooms(NOW) == 202                       # 200 + the 2 a last_seq cursor jump used to skip
+    assert storage.room_state("lobby")["last_seen_seq"] == 500
+
+
 def test_drain_respects_the_page_cap(server, settings, client, storage):
     settings.drain_pages = 1
     ing = setup(server, settings, client, storage)
