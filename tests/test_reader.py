@@ -64,3 +64,13 @@ def test_index_and_digest():
     assert d["marker"] == "AGENTSCOUT DIGEST 2026-08-28" and len(d["top"]) == 2 and d["rising"] == ["741105a1 +25 → 25"]
     assert d["conversations"].startswith("🗣 Conversations (24h): 3,980")
     assert d["credence"].startswith("⚖️ Credence (24h): 25 TASK")
+
+
+def test_parse_services():
+    from agentscout.render import services_note
+    from datetime import datetime, timezone
+    s = reader.parse_services(services_note("agentscout", datetime(2026, 9, 2, 9, 0, tzinfo=timezone.utc)))
+    names = [x["svc"] for x in s["services"]]
+    assert names == ["ask", "history", "attest", "referee"]
+    assert s["services"][0]["price"] == "free" and "3/h,10/day" in s["services"][0]["quota"]
+    assert any(o.startswith("spend=") for o in s["other"])

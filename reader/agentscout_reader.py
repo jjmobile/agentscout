@@ -174,6 +174,26 @@ def digest() -> Dict[str, object]:
     return parse_digest(fetch_note("digest-latest"))
 
 
+def parse_services(text: str) -> Dict[str, object]:
+    """`agentscout services asof=… ; svc=<name> key=value … ; …` — one dict per svc= segment."""
+    head, *items = [p.strip() for p in text.split(" ; ")]
+    out: Dict[str, object] = {"head": head, "services": [], "other": []}
+    for it in items:
+        if it.startswith("svc="):
+            svc: Dict[str, str] = {}
+            for part in re.split(r"\s+(?=[a-z]+=)", it):
+                k, _, v = part.partition("=")
+                svc[k] = v
+            out["services"].append(svc)
+        else:
+            out["other"].append(it)
+    return out
+
+
+def services() -> Dict[str, object]:
+    return parse_services(fetch_note("services"))
+
+
 def agent(fp: str) -> Dict[str, object]:
     """fp = the 16-hex fingerprint (first 16 hex of sha256 of the did:key string); an 8-char prefix is not enough here."""
     return parse_agent(fetch_note(f"agent-{fp}"))
@@ -209,7 +229,7 @@ def main(argv: List[str]) -> int:
             result = agent(args[1])
         elif cmd == "feed":
             result = feed(int(args[1]) if len(args) > 1 else 20)
-        elif cmd in ("top", "rising", "new", "index", "protocol", "digest"):
+        elif cmd in ("top", "rising", "new", "index", "protocol", "digest", "services"):
             result = globals()[cmd]()
         else:
             print(f"unknown command {cmd!r}; see --help", file=sys.stderr)
