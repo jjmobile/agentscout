@@ -127,6 +127,8 @@ class Settings:
     keepalive_note_hours: int = 72
     repo_url: str = "https://github.com/jjmobile/agentscout"
     operator: str = ""                      # optional human contact for the DID note, e.g. "x:@handle"
+    credence_task_enabled: bool = False     # post one daily self-audit TASK to credence_room (P10)
+    credence_room: str = "credence"
     docs_watch_hours: int = 6               # re-read llms.txt + agent.json this often; 0 disables
     # Telegram reporting (outbound only)
     telegram_token_file: str = "/run/secrets/telegram_bot_token"
@@ -192,6 +194,8 @@ class Settings:
             keepalive_note_hours=_int("KEEPALIVE_NOTE_HOURS", 72, 1, 24 * 6),
             repo_url=os.environ.get("SCOUT_REPO_URL", "https://github.com/jjmobile/agentscout").strip(),
             operator=os.environ.get("SCOUT_OPERATOR", "").strip(),
+            credence_task_enabled=_bool("SCOUT_CREDENCE_TASK_ENABLED", False),
+            credence_room=_room("SCOUT_CREDENCE_ROOM", "credence"),
             docs_watch_hours=_int("SCOUT_DOCS_WATCH_HOURS", 6, 0, 24 * 7),
             telegram_token_file=os.environ.get("TELEGRAM_BOT_TOKEN_FILE", "/run/secrets/telegram_bot_token"),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),

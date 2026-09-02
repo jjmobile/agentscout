@@ -66,7 +66,9 @@ class Publisher:
         latest = self.db.published_note(self.s.kv_ns, "digest-latest")
         top = self.db.published_note(self.s.kv_ns, "top")
         index = self.db.published_note(self.s.kv_ns, "index")            # a key added by a newer build: write it today, not tomorrow
-        return latest is None or top is None or index is None or latest["written_at"] < row["created_at"] or top["written_at"] < row["created_at"]
+        services = self.db.published_note(self.s.kv_ns, "services")
+        return (latest is None or top is None or index is None or services is None
+                or latest["written_at"] < row["created_at"] or top["written_at"] < row["created_at"])
 
     def tick(self, now: datetime, scored: Optional[dict]) -> None:
         day = now.strftime("%Y-%m-%d")
@@ -83,22 +85,28 @@ class Publisher:
                 wmarker = f"AGENTSCOUT WEEKLY {day}"
                 if not self.db.outbox_has(self.s.feed_room, wmarker):
                     self._enqueue("weekly", wmarker, render.weekly_line(scored, self.db, now), now)
+        if self.s.credence_task_enabled and now.hour >= self.s.digest_utc_hour:
+            task = render.credence_task_line(self.s.kv_ns, self.id.did, now)
+            tmarker = task.split(" | ")[1]                       # the deterministic per-day task id
+            if not self.db.outbox_has(self.s.credence_room, tmarker):
+                self._enqueue("credence-task", tmarker, task, now, room=self.s.credence_room)
         self.flush_outbox(now)
         self.flush_pending_notes(now)
         self.keepalive_did_note(now)
 
-    def _enqueue(self, kind: str, marker: str, text: str, now: datetime) -> None:
+    def _enqueue(self, kind: str, marker: str, text: str, now: datetime, room: Optional[str] = None) -> None:
+        room = room or self.s.feed_room
         if not self.live:
-            log.info("DRY_RUN: would post %s to %s: %s", kind, self.s.feed_room, text)
+            log.info("DRY_RUN: would post %s to %s: %s", kind, room, text)
             if self.notify:
                 self.notify.send(f"[dry-run] would post {kind}:\n{text}")
-            self.db.enqueue(self.s.feed_room, kind, marker, text, iso(now))
-            row = self.db.outbox_has(self.s.feed_room, marker)
+            self.db.enqueue(room, kind, marker, text, iso(now))
+            row = self.db.outbox_has(room, marker)
             if row:
                 self.db.outbox_update(row["id"], "DRY_RUN", iso(now))
             return
-        self.db.enqueue(self.s.feed_room, kind, marker, text, iso(now))
-        log.info("queued %s for %s (%d chars)", kind, self.s.feed_room, len(text))
+        self.db.enqueue(room, kind, marker, text, iso(now))
+        log.info("queued %s for %s (%d chars)", kind, room, len(text))
 
     # ---- signed posting ------------------------------------------------------------------------
     def flush_outbox(self, now: datetime) -> None:
@@ -208,6 +216,7 @@ class Publisher:
             "top": render.list_note(render.top(scored, 10), "top", now),
             "rising": render.rising_note(render.rising(scored, self.db, now, 10), now),
             "index": render.index_note(ns, self.s.feed_room, now),
+            "services": render.services_note(ns, now),
             "digest-latest": formatter.note_line(render.digest_line(scored, self.db, now, ask_rooms=self.ask_rooms)),
             "protocol": self.protocol_note(now),
         }
@@ -305,7 +314,8 @@ class Publisher:
         operator = f"operator:{self.s.operator} " if self.s.operator else ""
         return formatter.note_line(
             f"{self.id.did} name:AgentScout role:network-observer feed:{self.s.feed_room} {ask}repo:{self.s.repo_url} "
-            f"scoring:{self.s.repo_url}/blob/main/SCORING.md page:https://jjmobile.github.io/agentscout/ {operator}observed-behaviour-not-endorsement")
+            f"scoring:{self.s.repo_url}/blob/main/SCORING.md page:https://jjmobile.github.io/agentscout/ "
+            f"services:/kv/{self.s.kv_ns}/services {operator}observed-behaviour-not-endorsement")
 
     DID_NOTE_RETRY_HOURS = 1
 

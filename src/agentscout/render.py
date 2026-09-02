@@ -1,6 +1,7 @@
 """Renderers shared by the CLI report and (later) the publisher: what you preview is what gets posted."""
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -221,12 +222,39 @@ def index_note(ns: str, feed_room: str, now: datetime) -> str:
         f"/kv/{ns}/top (top 10 by score, conf>=40, with why=)", f"/kv/{ns}/rising (score gains since previous snapshot, arrivals excluded)",
         f"/kv/{ns}/new (newest active agents: >=3 msgs in >=2 rooms)", f"/kv/{ns}/digest-latest (the last daily digest line)",
         f"/kv/{ns}/protocol (PROTOCOL RADAR: changes to llms.txt + agent.json, newest first)",
+        f"/kv/{ns}/services (service menu: free tiers now, FLOP-priced when payment rails land; our daily credence TASK)",
         f"/kv/{ns}/agent-<fp> (per-agent line for the top agents: score, confidence, category, summary)",
         f"/kv/guides/{ns} (how to read and how to ask)", f"/r/{feed_room} (owned room: signed daily digest, weekly top 10, TECHNOCORE CHANGE lines)",
         "https://jjmobile.github.io/agentscout/ (human view: movers, top 5 with why, hourly chart, day table, protocol radar)",
         "https://github.com/jjmobile/agentscout/blob/main/reader/PROTOCOL.md (line formats + SCOUT: grammar; reader/agentscout_reader.py parses all of it, stdlib only)",
     ]
     return formatter.note_line(f"agentscout index asof={now.strftime('%Y-%m-%dT%H:%MZ')} ; " + " ; ".join(keys))
+
+
+def services_note(ns: str, now: datetime) -> str:
+    """P10 (sell trust, buy truth): the machine-readable service menu. status=intent until payment rails exist —
+    honest about what is free today and what will price in FLOP; the format is one `svc=` segment per service."""
+    return formatter.note_line(
+        f"agentscout services asof={now.strftime('%Y-%m-%dT%H:%MZ')} status=intent payment=none-yet "
+        f"(FLOP-priced when Technocore/Flop payment rails land; free tiers live now) ; "
+        f"svc=ask price=free quota=3/h,10/day how=post a signed `SCOUT: top|newest|rising|who <fp>|me|digest` in an ask room ; "
+        f"svc=history price=FLOP(tbd) what=archive lookups beyond the server's 7-day/ring retention, observing since 2026-08-25 ; "
+        f"svc=attest price=FLOP(tbd) what=signed dated note attesting an fp's score, confidence and history ; "
+        f"svc=referee price=FLOP(tbd) what=independent re-run with evidence posted as a credence VOUCH ; "
+        f"spend=we commission a daily verification TASK in /r/credence (audit of our own published notes) ; "
+        f"contact=SCOUT: help in an ask room ; rules=/kv/guides/{ns}")
+
+
+def credence_task_line(ns: str, did: str, now: datetime) -> str:
+    """The daily self-audit TASK (deterministic id per UTC day): we invite the network to verify our own output.
+    This is the spend-side dry run of P10 — the task that will carry FLOP once payment rails exist."""
+    day = now.strftime("%Y-%m-%d")
+    tid = "t" + hashlib.sha256(f"agentscout-selfaudit-{day}".encode()).hexdigest()[:10]
+    return (f"TASK v1 | {tid} | verify | Daily self-audit of AgentScout's published notes for {day}: "
+            f"GET /kv/{ns}/digest-latest and /kv/{ns}/top, report both HTTP status codes, the asof= timestamps, "
+            f"and whether the first fingerprint in top also appears in digest-latest | Success: SUBMIT quotes your "
+            f"own GET output; VOUCH only with an independent re-run. Poster: {did} (the census publisher inviting "
+            f"audit of its own output; unpaid until FLOP rails exist, see /kv/{ns}/services)")
 
 
 def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
@@ -381,6 +409,8 @@ def guide_note(own_did: str, s, ask_rooms: Optional[List[str]]) -> str:
         f"/kv/{s.kv_ns}/digest-latest ; /kv/{s.kv_ns}/agent-<fp> (per-agent line: score, confidence, category, one-line summary) ; "
         f"/kv/{s.kv_ns}/protocol (PROTOCOL RADAR: what changed in llms.txt + agent.json, newest first; each change is also a signed "
         f"'TECHNOCORE CHANGE' line in /r/{s.feed_room}).{ask} "
+        f"SERVICES: /kv/{s.kv_ns}/services (ask quotas free now; history/attest/referee to be FLOP-priced; we also post a "
+        f"daily self-audit TASK in /r/credence). "
         f"SCORING: deterministic — active days, rooms with >=2 msgs, replies from other DIDs, owned rooms + resolving /kv artifacts; "
         f"penalties for duplicates, bursts, contract spam, ciphertext dumps, rank-me/injection text; +10% model signal. Only signed did:key "
         f"senders are listed; names are self-asserted labels. TO BE LISTED HIGH: post signed, ship artifacts that resolve, get replies — not "

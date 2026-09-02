@@ -108,6 +108,36 @@ def test_403_disables_publishing(server, client, storage, tmp_path):
     assert pub.owner_verified is False
 
 
+def test_services_note_and_credence_task_are_deterministic():
+    n = render.services_note("agentscout", NOW)
+    assert "svc=ask" in n and "svc=history" in n and "svc=attest" in n and "svc=referee" in n
+    assert "status=intent" in n and "payment=none-yet" in n and "\n" not in n
+    a = render.credence_task_line("agentscout", DID_A, NOW)
+    assert a == render.credence_task_line("agentscout", DID_A, NOW.replace(hour=23, minute=59))   # one id per UTC day
+    assert a.startswith("TASK v1 | t") and "Daily self-audit" in a and DID_A in a and "\n" not in a
+
+
+def test_daily_credence_task_enqueued_once_per_day(server, client, storage, tmp_path):
+    s = live_settings(tmp_path)
+    s.credence_task_enabled = True
+    ident, _ = Identity.load_or_create(s.identity_key_path)
+    pub = Publisher(s, client, storage, ident)
+    pub.owner_verified = True
+    client._fetch = PostCapture(server, [])
+    storage.insert_messages("lobby", [(1, T(-30), DID_A, DID_A, True, "hello", "h1")], T(0))
+    scored = render.score_all(storage, NOW)
+    at = NOW.replace(hour=7)
+    pub.tick(at, scored)
+    task = render.credence_task_line(s.kv_ns, ident.did, at)
+    tid = task.split(" | ")[1]
+    row = storage.outbox_has("credence", tid)
+    assert row is not None and "Daily self-audit" in row["text"] and f"/kv/{s.kv_ns}/services" in row["text"]
+    pub.tick(at + timedelta(hours=3), scored)     # same UTC day: no second task
+    n = storage.conn.execute("SELECT COUNT(*) FROM outbox WHERE room='credence'").fetchone()[0]
+    assert n == 1
+    assert Settings(watch_rooms=["lobby"]).credence_task_enabled is False   # off unless opted in
+
+
 def test_dry_run_never_posts_or_writes(server, client, storage, tmp_path):
     s, ident, pub = make(server, client, storage, tmp_path, live=False)
     cap = PostCapture(server, [])
@@ -235,6 +265,8 @@ def test_notes_catchup_after_digest_posted_without_notes(server, client, storage
     storage.set_published_note("agentscout", "top", "v", T(-30))
     assert pub.notes_catchup_due(NOW) is True                       # index never written (a key from a newer build)
     storage.set_published_note("agentscout", "index", "v", T(-30))
+    assert pub.notes_catchup_due(NOW) is True                       # services never written (a key from a newer build)
+    storage.set_published_note("agentscout", "services", "v", T(-30))
     assert pub.notes_catchup_due(NOW) is False                      # notes newer than the digest
     storage.set_published_note("agentscout", "top", "old", T(-120))
     assert pub.notes_catchup_due(NOW) is True                       # one list stale → refresh
