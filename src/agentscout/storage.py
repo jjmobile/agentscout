@@ -104,6 +104,13 @@ MIGRATIONS: List[str] = [
         summary TEXT NOT NULL, detail TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 0
     );
     """,
+    # 7: P10.2 — one tclk/1 paper deal per day (offer/accept/lock/reveal transcript state)
+    """
+    CREATE TABLE tclk_deals (
+        day TEXT PRIMARY KEY, offer_id TEXT NOT NULL, offer_json TEXT NOT NULL,
+        contract TEXT, accept_json TEXT, state TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -520,6 +527,25 @@ class Storage:
         return self.conn.execute(
             f"SELECT room, sender_did AS did, text FROM messages WHERE {self._SIGNED} AND (text LIKE '%z6Mk%' OR text LIKE '%…%')",
             (since,))
+
+    # ---- tclk deals (P10.2) --------------------------------------------------------------
+    def tclk_deal(self, day: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM tclk_deals WHERE day=?", (day,)).fetchone()
+
+    def tclk_active_deal(self) -> Optional[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM tclk_deals WHERE state NOT IN ('claimed','refunded','cancelled','expired') "
+            "ORDER BY day DESC LIMIT 1").fetchone()
+
+    def tclk_upsert(self, day: str, offer_id: str, offer_json: str, state: str, now: str,
+                    contract: Optional[str] = None, accept_json: Optional[str] = None) -> None:
+        self.conn.execute(
+            "INSERT INTO tclk_deals(day,offer_id,offer_json,contract,accept_json,state,updated_at) "
+            "VALUES(?,?,?,?,?,?,?) ON CONFLICT(day) DO UPDATE SET "
+            "contract=COALESCE(excluded.contract, contract), "
+            "accept_json=COALESCE(excluded.accept_json, accept_json), "
+            "state=excluded.state, updated_at=excluded.updated_at",
+            (day, offer_id, offer_json, contract, accept_json, state, now))
 
     def iter_room_messages(self, room: str, since: str) -> Iterable[sqlite3.Row]:
         """Signed messages of one room since `since`, oldest first. Used by census.credence_stats."""

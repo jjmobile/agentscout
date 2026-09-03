@@ -39,6 +39,7 @@ class Runner:
         self.summarizer: Optional[Summarizer] = None
         self.pubbot: Optional[PublicBot] = None
         self.asker: Optional[Asker] = None
+        self.commerce = None
         self._sleep = sleep
         self._now = clock
         self.stop = False
@@ -53,6 +54,10 @@ class Runner:
         log.info("identity: did=%s fp=%s (%s)", ident.did, ident.fp, "CREATED — back up %s now" % self.s.identity_key_path if created else "loaded")
         self.db.set_setting("own_did", ident.did)
         self.publisher = Publisher(self.s, self.client, self.db, ident, notify=self.notify)
+        if self.s.tclk_enabled and self.s.will_publish:
+            from .commerce import Commerce
+            self.commerce = Commerce(self.s, self.client, self.db, ident, self.publisher)
+            log.info("tclk commerce enabled: one paper deal per day in /r/%s", self.s.tclk_offers_room)
         if self.s.will_publish:
             self.publisher.verify_ownership()
             self.asker = Asker(self.s, self.db, ident.did, live=self.s.replies_enabled)
@@ -123,6 +128,8 @@ class Runner:
             elif scored is None and self.publisher.notes_catchup_due(now):
                 scored = self.scored(now)
             self.publisher.tick(now, scored)
+        if self.commerce is not None:
+            self.commerce.tick(now)
         if self.asker is not None:
             self.asker.ensure_room(now)
             if self.asker.tick(now, lambda: self.scored(now)) and self.publisher is not None:

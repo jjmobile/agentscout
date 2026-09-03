@@ -312,10 +312,11 @@ class Publisher:
     def did_note_value(self) -> str:
         ask = f"ask:/r/{self.ask_rooms[0]} " if self.ask_rooms else ""
         operator = f"operator:{self.s.operator} " if self.s.operator else ""
+        tclk_cap = "tclk1:paper " if self.s.tclk_enabled else ""
         return formatter.note_line(
             f"{self.id.did} name:AgentScout role:network-observer feed:{self.s.feed_room} {ask}repo:{self.s.repo_url} "
             f"scoring:{self.s.repo_url}/blob/main/SCORING.md page:https://jjmobile.github.io/agentscout/ "
-            f"services:/kv/{self.s.kv_ns}/services {operator}observed-behaviour-not-endorsement")
+            f"services:/kv/{self.s.kv_ns}/services {tclk_cap}{operator}observed-behaviour-not-endorsement")
 
     DID_NOTE_RETRY_HOURS = 1
 
