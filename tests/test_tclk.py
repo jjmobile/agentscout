@@ -151,6 +151,24 @@ def test_commerce_opens_one_offer_per_day_and_folds_a_valid_accept(server, setti
     assert row["state"] == "accepted" and row["contract"] == accept["contract"]
 
 
+def test_commerce_folds_stored_accept_with_seen_ms_bookkeeping(server, settings, client, storage, tmp_path):
+    """Regression (2026-09-03): the stored accept carries a `_seen_ms` bookkeeping key that the
+    fail-closed validator must never see, or the deal wedges at `accepted` forever."""
+    s, ident, com = make_commerce(server, client, storage, tmp_path)
+    at = NOW.replace(hour=7)
+    com.tick(at)
+    offer = json.loads(storage.tclk_active_deal()["offer_json"])
+    preimage, statement = tclk.generate_hash_lock()
+    core = {"from": DID_A, "ref": offer["id"], "statement": statement, "nonce": "0011223344556677"}
+    accept = dict({"type": "accept"}, **core, contract=tclk.contract_id(offer, core))
+    storage.insert_messages(s.tclk_offers_room,
+                            [(1, T(1), DID_A, DID_A, True, tclk.encode_frame(accept), "h1")], T(1))
+    com.tick(at + timedelta(minutes=10))
+    assert storage.tclk_active_deal()["state"] == "accepted"
+    state = com._fold(storage.tclk_active_deal())
+    assert state is not None and state["state"] == "accepted" and state["contract"] == accept["contract"]
+
+
 def test_commerce_rejects_forged_sender(server, settings, client, storage, tmp_path):
     s, ident, com = make_commerce(server, client, storage, tmp_path)
     at = NOW.replace(hour=7)

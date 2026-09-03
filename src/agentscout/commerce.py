@@ -90,7 +90,8 @@ class Commerce:
             return None
         if row["accept_json"]:
             accept = json.loads(row["accept_json"])
-            state, ok, why = tclk.apply_frame(state, accept, accept.get("_seen_ms", 0))
+            seen_ms = accept.pop("_seen_ms", 0)      # bookkeeping key; the fail-closed validator must never see it
+            state, ok, why = tclk.apply_frame(state, accept, seen_ms)
             if not ok:
                 log.error("tclk: stored accept no longer applies (%s)", why)
                 return None
