@@ -449,20 +449,28 @@ class CredenceStats:
     submits: int = 0
     vouches: int = 0
     agents: int = 0          # distinct DIDs that posted a verb line
-    verified: int = 0        # task ids with TASK+SUBMIT+VOUCH in the window and a voucher who is not a submitter
+    verified: int = 0        # TASK+SUBMIT + a non-submitter, non-template vouch in the window
+    template_vouches: int = 0  # vouches whose (sender, digit-stripped text) stamps >= TEMPLATE_VOUCH_MIN tasks
 
     @property
     def total(self) -> int:
         return self.tasks + self.accepts + self.submits + self.vouches
 
 
+TEMPLATE_VOUCH_MIN = 3      # a sender re-using one vouch text (digits stripped) on this many tasks is a stamp machine
+_DIGITS_RE = re.compile(r"[0-9]+")
+
+
 def credence_stats(storage, since: str, room: str = CREDENCE_ROOM) -> CredenceStats:
-    """One streaming pass over the room's signed messages. `verified` deliberately excludes self-play: a DID
-    that posts, submits and vouches its own task id has proven nothing to anyone."""
+    """One streaming pass over the room's signed messages. `verified` deliberately excludes self-play (a DID
+    that posts, submits and vouches its own task id has proven nothing) AND template vouches: the same sender
+    stamping the same text (digits stripped, so incrementing counters collapse) onto TEMPLATE_VOUCH_MIN or
+    more tasks is not re-running anything — seen live 2026-09-02, '[CREDENCE_PEER_REVIEW] … Stamp:178833'."""
     st = CredenceStats()
     counts = {"TASK": 0, "ACCEPT": 0, "SUBMIT": 0, "VOUCH": 0}
     dids: set = set()
     by_task: Dict[str, Dict[str, set]] = {}
+    vouches: List[Tuple[str, str, str]] = []                       # (task, did, template signature)
     for r in storage.iter_room_messages(room, since):
         m = _CREDENCE_VERB_RE.match(r["text"])
         if not m:
@@ -471,9 +479,21 @@ def credence_stats(storage, since: str, room: str = CREDENCE_ROOM) -> CredenceSt
         counts[verb] += 1
         dids.add(r["did"])
         by_task.setdefault(task, {}).setdefault(verb, set()).add(r["did"])
+        if verb == "VOUCH":
+            vouches.append((task, r["did"], _DIGITS_RE.sub("", r["text"].replace(task, ""))))
     st.tasks, st.accepts, st.submits, st.vouches = counts["TASK"], counts["ACCEPT"], counts["SUBMIT"], counts["VOUCH"]
     st.agents = len(dids)
-    st.verified = sum(1 for v in by_task.values() if "TASK" in v and "SUBMIT" in v and v.get("VOUCH", set()) - v.get("SUBMIT", set()))
+    sig_tasks: Dict[Tuple[str, str], set] = {}
+    for task, did, sig in vouches:
+        sig_tasks.setdefault((did, sig), set()).add(task)
+    templated = {(did, sig) for (did, sig), ts in sig_tasks.items() if len(ts) >= TEMPLATE_VOUCH_MIN}
+    st.template_vouches = sum(1 for task, did, sig in vouches if (did, sig) in templated)
+    real_vouchers: Dict[str, set] = {}
+    for task, did, sig in vouches:
+        if (did, sig) not in templated:
+            real_vouchers.setdefault(task, set()).add(did)
+    st.verified = sum(1 for task, v in by_task.items()
+                      if "TASK" in v and "SUBMIT" in v and real_vouchers.get(task, set()) - v.get("SUBMIT", set()))
     return st
 
 

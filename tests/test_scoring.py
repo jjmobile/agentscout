@@ -130,7 +130,30 @@ def test_credence_line_in_digest(storage):
     storage.insert_messages("credence", rows, T(0))
     line = render.digest_line(render.score_all(storage, NOW), storage, NOW)
     assert ("⚖️ Credence (24h): 2 TASK, 1 ACCEPT, 2 SUBMIT, 2 VOUCH by 2 agents; "
-            "1 tasks verified end-to-end (vouched by a non-submitter)") in line
+            "1 tasks verified end-to-end (non-submitter, non-template vouch)") in line
+
+
+def test_credence_template_vouches_do_not_verify(storage):
+    """A stamp machine vouching >=3 tasks with the same digit-stripped text must not count as verification;
+    a distinct evidence-bearing vouch on the same task still does."""
+    rows = []
+    seq = 0
+    for i, task in enumerate(("taaa11", "tbbb22", "tccc33")):
+        for verb, did, text in ((f"TASK v1 | {task} | build | job {i}", DID_A, None),
+                                (f"SUBMIT v1 | {task} | did the work {i}", DID_A, None)):
+            seq += 1
+            rows.append((seq, T(-60 + seq), DID_A, DID_A, True, verb, f"h{seq}"))
+        seq += 1
+        rows.append((seq, T(-60 + seq), DID_B, DID_B, True,
+                     f"VOUCH v1 | {task} | useful | [PEER_REVIEW] Independently verified. Stamp:17883{i}", f"h{seq}"))
+    storage.insert_messages("credence", rows, T(0))
+    from agentscout.census import credence_stats
+    cs = credence_stats(storage, T(-120))
+    assert cs.template_vouches == 3 and cs.verified == 0        # all three vouches are one stamp template
+    storage.insert_messages("credence", [(seq + 1, T(-1), DID_B, DID_B, True,
+                                          "VOUCH v1 | taaa11 | useful | Re-ran GET /r/lobby myself: HTTP 200 count=1, matches the claim", "hx")], T(0))
+    cs = credence_stats(storage, T(-120))
+    assert cs.verified == 1 and cs.template_vouches == 3
 
 
 def test_credence_line_absent_while_room_silent(storage):

@@ -133,8 +133,9 @@ def credence_line(storage: Storage, since: str) -> str:
     cs = credence_stats(storage, since)
     if not cs.total:
         return ""
+    discounted = f", {cs.template_vouches:,} template vouches discounted" if cs.template_vouches else ""
     return (f"⚖️ Credence (24h): {cs.tasks:,} TASK, {cs.accepts:,} ACCEPT, {cs.submits:,} SUBMIT, {cs.vouches:,} VOUCH "
-            f"by {cs.agents:,} agents; {cs.verified:,} tasks verified end-to-end (vouched by a non-submitter)")
+            f"by {cs.agents:,} agents; {cs.verified:,} tasks verified end-to-end (non-submitter, non-template vouch{discounted})")
 
 
 def usage_line(counters: Dict[str, int], mentions: Tuple[int, int]) -> str:

@@ -40,6 +40,7 @@ class Runner:
         self.pubbot: Optional[PublicBot] = None
         self.asker: Optional[Asker] = None
         self.commerce = None
+        self.selfaudit = None
         self._sleep = sleep
         self._now = clock
         self.stop = False
@@ -54,6 +55,10 @@ class Runner:
         log.info("identity: did=%s fp=%s (%s)", ident.did, ident.fp, "CREATED — back up %s now" % self.s.identity_key_path if created else "loaded")
         self.db.set_setting("own_did", ident.did)
         self.publisher = Publisher(self.s, self.client, self.db, ident, notify=self.notify)
+        if self.s.credence_task_enabled and self.s.will_publish:
+            from .selfaudit import SelfAudit
+            self.selfaudit = SelfAudit(self.s, self.db, ident, self.publisher)
+            log.info("self-audit referee enabled: deterministic vouches on submissions to our daily task")
         if self.s.tclk_enabled and self.s.will_publish:
             from .commerce import Commerce
             self.commerce = Commerce(self.s, self.client, self.db, ident, self.publisher)
@@ -130,6 +135,8 @@ class Runner:
             self.publisher.tick(now, scored)
         if self.commerce is not None:
             self.commerce.tick(now)
+        if self.selfaudit is not None:
+            self.selfaudit.tick(now)
         if self.asker is not None:
             self.asker.ensure_room(now)
             if self.asker.tick(now, lambda: self.scored(now)) and self.publisher is not None:
