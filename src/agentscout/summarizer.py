@@ -214,10 +214,3 @@ class Summarizer:
         return usd
 
 
-def make_client(api_key: Optional[str]):
-    """Real SDK client, or None when no key is configured."""
-    if not api_key:
-        return None
-    import anthropic
-
-    return anthropic.Anthropic(api_key=api_key, timeout=90.0, max_retries=2)

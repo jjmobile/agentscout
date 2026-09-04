@@ -63,7 +63,10 @@ class Ingestor:
         return limits
 
     # ---- protocol docs ----------------------------------------------------------------
-    DOC_KEYWORDS = ("faucet", "testnet", "airdrop", "flop", "wallet", "reward", "claim")
+    # faucet/airdrop terms + P6 inference-marketplace terms: the day spendable inference is
+    # advertised we want the WARN immediately, so the inference seam can be switched on (inference.py).
+    DOC_KEYWORDS = ("faucet", "testnet", "airdrop", "flop", "wallet", "reward", "claim",
+                    "inference", "compute", "gpu", "miner", "settle", "x402")
 
     def watch_docs(self, now: datetime) -> bool:
         """Every docs_watch_hours re-read llms.txt + agent.json; a change is a WARNING (it reaches Telegram) that

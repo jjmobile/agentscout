@@ -138,6 +138,7 @@ class Settings:
     telegram_max_per_hour: int = 20
     # Milestone C — Claude summaries
     model: str = "claude-opus-5"
+    inference_provider: str = "anthropic"   # P6 seam: 'anthropic' | 'flop' (routes inference + FLOP spend via Flop)
     effort: str = "low"
     max_tokens: int = 1024
     max_summaries_per_hour: int = 20
@@ -205,6 +206,7 @@ class Settings:
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
             telegram_max_per_hour=_int("TELEGRAM_MAX_PER_HOUR", 20, 1, 500),
             model=os.environ.get("SCOUT_MODEL", "claude-opus-5").strip(),
+            inference_provider=os.environ.get("SCOUT_INFERENCE_PROVIDER", "anthropic").strip().lower(),
             effort=_effort(os.environ.get("SCOUT_EFFORT", "low")),
             max_tokens=_int("SCOUT_MAX_TOKENS", 1024, 256, 16000),
             max_summaries_per_hour=_int("SCOUT_MAX_SUMMARIES_PER_HOUR", 20, 0, 1000),

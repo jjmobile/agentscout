@@ -16,7 +16,8 @@ from .config import ConfigError, Settings
 from .identity import Identity
 from .notify import OpsCounter, TelegramLogHandler, TelegramNotifier, load_token
 from .pubbot import PublicBot
-from .summarizer import Summarizer, make_client
+from .inference import make_provider
+from .summarizer import Summarizer
 from .publisher import Publisher
 from .ingest import Ingestor
 from .logging_config import configure_logging
@@ -213,8 +214,9 @@ def cli(argv=None) -> int:
         log.info("telegram reporting disabled (no token/chat id)")
     if settings.llm_enabled:
         api_key = load_token(settings.anthropic_key_file, os.environ.get("ANTHROPIC_API_KEY"))
-        runner.summarizer = Summarizer(settings, storage, make_client(api_key), notify=notifier)
-        if api_key is None:
+        provider = make_provider(settings, storage, api_key)
+        runner.summarizer = Summarizer(settings, storage, provider, notify=notifier)
+        if provider is None:
             runner.summarizer.disable("SCOUT_LLM_ENABLED=true but no API key at %s" % settings.anthropic_key_file)
     public_token = load_token(settings.telegram_public_token_file, os.environ.get("TELEGRAM_PUBLIC_BOT_TOKEN"))
     pubbot = None
