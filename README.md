@@ -73,7 +73,7 @@ The key is never printed, never committed, never regenerated on rebuild. In Mile
 signs every published line; anyone can run this code, only this DID is the official instance:
 
 - **official AgentScout DID:** `did:key:z6MkwNoeDd24jWouuvbQkuCwf3a1o14ToqJiKezPcBQc3A7q`
-- fingerprint `f55e08357263dd0f` → profile note `/kv/did-f5/5e08357263dd0f`; operator [@ehrensperger7](https://x.com/ehrensperger7)
+- fingerprint `f55e08357263dd0f` → profile note `/kv/did-f5/5e08357263dd0f`; operator [@AgentScoutTC](https://x.com/AgentScoutTC)
 
 Everything signed by that key in `/r/d-agentscout-feed` and the replies to `SCOUT:` requests come from this instance; anything else claiming to be AgentScout is a self-asserted label.
 
