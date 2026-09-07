@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Callable, List, Optional, Tuple
 
-from . import formatter, render
+from . import attestation, formatter, render
 from .config import Settings
 from .storage import Storage
 
@@ -55,10 +55,11 @@ ROOM_RETRY = timedelta(hours=1)
 
 
 class Asker:
-    def __init__(self, settings: Settings, storage: Storage, own_did: str, live: bool):
+    def __init__(self, settings: Settings, storage: Storage, own_did: str, live: bool, identity=None):
         self.s = settings
         self.db = storage
         self.own_did = own_did
+        self.id = identity                    # signing key; needed only for `SCOUT: attest` (else None)
         self.live = live                      # False = log-only ("would reply …"), nothing is written
         self.room = settings.ask_room         # the dedicated room (opened by us, kept alive weekly)
         self.rooms = list(settings.ask_rooms) # every room where "SCOUT: …" is answered — in that same room
@@ -142,7 +143,10 @@ class Asker:
             else:
                 if scored is None:
                     scored = scored_provider()
-                text = render.ask_reply(int(m["seq"]), m["did"], cmd, arg, scored, self.db, now, room)
+                if cmd == "attest":
+                    text = self._attest_text(int(m["seq"]), arg, scored, now)
+                else:
+                    text = render.ask_reply(int(m["seq"]), m["did"], cmd, arg, scored, self.db, now, room)
             if self.live:
                 self.db.enqueue(room, "ask", f"AGENTSCOUT re#{m['seq']}", text, iso(now))
                 self.db.record_ask(room, m["seq"], m["did"], m["ts"], command, state)
@@ -156,6 +160,27 @@ class Asker:
                 log.info("ask #%d in /r/%s from %s: %s → would reply: %s", m["seq"], room, m["did"][-8:], command, text[:160])
         self.db.set_setting(key, str(last_seq))
         return enqueued
+
+    def _attest_text(self, seq: int, arg: Optional[str], scored: dict, now: datetime) -> str:
+        """`SCOUT: attest <fp|did>` → a signed, portable reputation attestation for the requested agent,
+        inlined verbatim (bypasses one_line so the cryptographic object is never truncated/reflowed).
+        Unlike the top-N publish path this covers ANY observed agent, so negative/`flagged` reads are
+        reachable on request. Only public, observed facts; deterministic; gated by SCOUT_ATTEST_ENABLED."""
+        head = f"AGENTSCOUT re#{seq} attest"
+        if not (self.s.attest_enabled and self.id is not None):
+            return formatter.one_line([head, "attestations are not enabled on this instance"])
+        if not arg:
+            return formatter.one_line([head, "usage: SCOUT: attest <fp|did> — a signed, portable reputation attestation"])
+        hit = render.who(scored, self.db, arg)
+        if hit is None:
+            return formatter.one_line([head, f"{arg}: insufficient — not observed signing in a watched room, no attestation"])
+        facts = hit[0]
+        att = attestation.attest(self.id, facts, iso(now), window_days=self.s.score_window_days,
+                                 evidence=[f"who:/who {facts.fp}", f"feed:/r/{self.s.feed_room}", f"code:{self.s.repo_url}"],
+                                 nonce=attestation.daily_nonce(facts.fp, now.strftime("%Y-%m-%d")))
+        flags = "flags=" + (",".join(att["flags"]) if att["flags"] else "none")
+        return (f"{head} {facts.fp} band={att['read']['band']} score={att['read']['score']} {flags} "
+                f"signed={attestation.serialize(att)}")
 
     def _admit(self, did: str, command: str, now: datetime) -> str:
         """REPLIED | DUPLICATE (same command from the same DID within 1 h) | CAPACITY (first over-quota today) | CAPACITY_SILENT"""

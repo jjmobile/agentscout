@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Tuple
 
-from . import formatter, radar, render
+from . import attestation, formatter, radar, render
 from .ask import open_ask_rooms
 from .config import Settings
 from .identity import Identity
@@ -221,8 +221,16 @@ class Publisher:
             "protocol": self.protocol_note(now),
         }
         self._pending_notes[("guides", "agentscout")] = render.guide_note(self.id.did, self.s, self.ask_rooms)
+        day = now.strftime("%Y-%m-%d")
         for f, r in render.top(scored, self.s.kv_top_n):
             notes[f"agent-{f.fp}"] = render.agent_note(f, r, now)
+            # C1 delivery: the signed, portable reputation attestation, fetchable at /kv/<ns>/attest-<fp>.
+            # Opt-in (SCOUT_ATTEST_ENABLED) — it labels third parties publicly (incl. negative bands).
+            if self.s.attest_enabled:
+                att = attestation.attest(self.id, f, iso(now), window_days=self.s.score_window_days,
+                                         evidence=[f"who:/who {f.fp}", f"feed:/r/{self.s.feed_room}", f"code:{self.s.repo_url}"],
+                                         nonce=attestation.daily_nonce(f.fp, day))
+                notes[f"attest-{f.fp}"] = attestation.serialize(att)
         for key, value in notes.items():
             self._pending_notes[(ns, key)] = value       # newest value wins; written by flush_pending_notes
         self.flush_pending_notes(now)
@@ -287,8 +295,17 @@ class Publisher:
             if status == 409:
                 current = parse_conflict_value(body)
                 if current is None:
-                    log.warning("write /kv/%s/%s: 409 with unparseable body: %s", ns, key, body.strip()[:120])
-                    return False
+                    # Terse 409 body with no value in it — read the note to recover. A reclaimed note
+                    # (retention expired our slot) reads as absent, so retry as a create instead of
+                    # overwriting a value that no longer exists; otherwise CAS against what is really there.
+                    try:
+                        current = self.c.read_note(ns, key)
+                    except TechnocoreError as exc:
+                        log.info("write /kv/%s/%s: 409, and re-read failed (%s); will retry", ns, key, exc)
+                        return False
+                    if current is None:
+                        if_value, if_absent = None, True
+                        continue
                 if current == value:              # our earlier (timed-out) write landed after all
                     self.db.set_published_note(ns, key, value, iso(now))
                     return True

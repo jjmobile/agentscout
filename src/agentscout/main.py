@@ -66,7 +66,7 @@ class Runner:
             log.info("tclk commerce enabled: one paper deal per day in /r/%s", self.s.tclk_offers_room)
         if self.s.will_publish:
             self.publisher.verify_ownership()
-            self.asker = Asker(self.s, self.db, ident.did, live=self.s.replies_enabled)
+            self.asker = Asker(self.s, self.db, ident.did, live=self.s.replies_enabled, identity=ident)
             for room in self.s.ask_rooms:
                 if room != self.s.ask_room:               # the dedicated room is only polled once the server let us create it
                     self.db.ensure_room(room, "config", None, iso_now(self._now()))

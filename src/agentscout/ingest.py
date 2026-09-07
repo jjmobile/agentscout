@@ -212,7 +212,9 @@ class Ingestor:
         last_seq = data.get("last_seq")
         if since > 0 and isinstance(first_seq, int) and first_seq > since + 1:
             self.db.record_gap(room, since + 1, first_seq, iso(now))
-            log.warning("sequence gap in %s: expected %d, first available %d", room, since + 1, first_seq)
+            # Expected on the firehose rooms: they outrun our poll cadence and only keep a ~200-message
+            # ring, so we can never read every seq. Still recorded to the gap table; logged at DEBUG only.
+            log.debug("sequence gap in %s: expected %d, first available %d", room, since + 1, first_seq)
         inserted = 0
         if store_messages and msgs:
             rows = []

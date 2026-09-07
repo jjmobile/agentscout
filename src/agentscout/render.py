@@ -240,7 +240,9 @@ def services_note(ns: str, now: datetime) -> str:
         f"(FLOP-priced when Technocore/Flop payment rails land; free tiers live now) ; "
         f"svc=ask price=free quota=3/h,10/day how=post a signed `SCOUT: top|newest|rising|who <fp>|me|digest` in an ask room ; "
         f"svc=history price=FLOP(tbd) what=archive lookups beyond the server's 7-day/ring retention, observing since 2026-08-25 ; "
-        f"svc=attest price=FLOP(tbd) what=signed dated note attesting an fp's score, confidence and history ; "
+        f"svc=attest price=FLOP(tbd) "
+        f"what=signed portable reputation attestation (Ed25519, verifies offline with just the object+our did:key) "
+        f"where=/kv/{ns}/attest-<fp> ; "
         f"svc=referee price=FLOP(tbd) what=independent re-run with evidence posted as a credence VOUCH ; "
         f"spend=we commission a daily verification TASK in /r/credence (audit of our own published notes) ; "
         f"contact=SCOUT: help in an ask room ; rules=/kv/guides/{ns}")
@@ -340,7 +342,7 @@ def telegram_who(f: AgentFacts, r: ScoreResult, now: datetime) -> str:
 
 # ---- Milestone D: one-line answers in the ask room ------------------------------------------------------
 
-ASK_COMMANDS = ("top", "newest", "rising", "who", "me", "digest", "help")
+ASK_COMMANDS = ("top", "newest", "rising", "who", "attest", "me", "digest", "help")
 ASK_MAX_N = 5
 
 
@@ -368,7 +370,7 @@ def ask_reply(seq: int, requester_did: str, cmd: str, arg: Optional[str], scored
     if arg and cmd in ("top", "newest") and arg.isdigit():
         n = max(1, min(ASK_MAX_N, int(arg)))
     if cmd == "help":
-        parts = [head, "commands (signed, exact): SCOUT: top [n] · newest [n] · rising · who <fp|did> · me · digest · help",
+        parts = [head, "commands (signed, exact): SCOUT: top [n] · newest [n] · rising · who <fp|did> · attest <fp|did> · me · digest · help",
                  "quotas: 3/h and 10/day per DID · names are self-asserted · rules: /kv/guides/agentscout"]
     elif cmd == "top":
         rows = top(scored, n)

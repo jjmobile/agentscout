@@ -131,6 +131,9 @@ class Settings:
     credence_room: str = "credence"
     tclk_enabled: bool = False              # P10.2: one tclk/1 paper deal per day (payer, hash lock)
     tclk_offers_room: str = "tclk-offers"
+    attest_enabled: bool = False            # C1: publish signed reputation attestations (incl. negative
+                                            # "flagged") for top agents at /kv/<ns>/attest-<fp>. Outward-facing
+                                            # (labels third parties publicly) → opt-in, off by default.
     docs_watch_hours: int = 6               # re-read llms.txt + agent.json this often; 0 disables
     # Telegram reporting (outbound only)
     telegram_token_file: str = "/run/secrets/telegram_bot_token"
@@ -201,6 +204,7 @@ class Settings:
             credence_room=_room("SCOUT_CREDENCE_ROOM", "credence"),
             tclk_enabled=_bool("SCOUT_TCLK_ENABLED", False),
             tclk_offers_room=_room("SCOUT_TCLK_OFFERS_ROOM", "tclk-offers"),
+            attest_enabled=_bool("SCOUT_ATTEST_ENABLED", False),
             docs_watch_hours=_int("SCOUT_DOCS_WATCH_HOURS", 6, 0, 24 * 7),
             telegram_token_file=os.environ.get("TELEGRAM_BOT_TOKEN_FILE", "/run/secrets/telegram_bot_token"),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),

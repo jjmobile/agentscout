@@ -138,6 +138,43 @@ def test_daily_credence_task_enqueued_once_per_day(server, client, storage, tmp_
     assert Settings(watch_rooms=["lobby"]).credence_task_enabled is False   # off unless opted in
 
 
+def test_reputation_attestation_published_and_verifiable_for_top_agents(server, client, storage, tmp_path):
+    import json
+    from agentscout import attestation
+    from agentscout.identity import fingerprint
+    s, ident, pub = make(server, client, storage, tmp_path)
+    s.attest_enabled = True                                  # opt-in; off by default
+    client._fetch = PostCapture(server, [])                  # every note write returns 200
+    seq = 1                                                  # a well-observed agent: 4 days, 3 rooms
+    for dday in (-3, -2, -1, 0):
+        for room in ("lobby", "ai", "general"):
+            storage.insert_messages(room, [(seq, T(dday * 1440), DID_A, DID_A, True, f"msg {seq}", f"h{seq}")], T(0))
+            seq += 1
+    scored = render.score_all(storage, NOW)
+    pub.refresh_notes(scored, NOW)
+    fp = fingerprint(DID_A)
+    rec = storage.published_note(s.kv_ns, f"attest-{fp}")
+    assert rec is not None, "no attestation note published for a top agent"
+    obj = json.loads(rec["value"])
+    v = attestation.verify(obj, now=NOW)
+    assert v.ok and v.authentic and obj["issuer"] == ident.did and obj["subject"] == DID_A
+    assert obj["read"]["band"] in ("insufficient", "emerging", "established", "flagged")
+    # idempotent within a day: same nonce ⇒ re-publish is byte-identical
+    again = attestation.attest(ident, scored[DID_A][0], obj["asof"], window_days=s.score_window_days,
+                               evidence=obj["evidence"], nonce=attestation.daily_nonce(fp, "2026-08-25"))
+    assert attestation.serialize(again) == rec["value"]
+
+
+def test_attestations_are_off_by_default(server, client, storage, tmp_path):
+    from agentscout.identity import fingerprint
+    s, ident, pub = make(server, client, storage, tmp_path)
+    assert s.attest_enabled is False                         # opt-in: labels third parties publicly
+    client._fetch = PostCapture(server, [])
+    storage.insert_messages("lobby", [(i, T(-30), DID_A, DID_A, True, f"m{i}", f"h{i}") for i in range(1, 6)], T(0))
+    pub.refresh_notes(render.score_all(storage, NOW), NOW)
+    assert storage.published_note(s.kv_ns, f"attest-{fingerprint(DID_A)}") is None
+
+
 def test_dry_run_never_posts_or_writes(server, client, storage, tmp_path):
     s, ident, pub = make(server, client, storage, tmp_path, live=False)
     cap = PostCapture(server, [])
@@ -161,6 +198,20 @@ def test_note_cas_detects_tamper_and_wins(server, client, storage, tmp_path):
     assert cap.bodies[1] == {"value": "v2", "if": "v1"}
     assert cap.bodies[2] == {"value": "v2", "if": "EVIL"}
     assert storage.published_note("agentscout", "top")["tamper_events"] == 1
+
+
+def test_reclaimed_note_reverts_to_a_create_instead_of_looping_on_409(server, client, storage, tmp_path):
+    # A note we recorded as published gets reclaimed by retention (gone server-side). The CAS overwrite
+    # then 409s with a terse, valueless body; we must re-read (404 -> absent) and recreate, not loop.
+    s, ident, pub = make(server, client, storage, tmp_path)
+    storage.set_published_note("agentscout", "top", "v0", T(-9000))       # our stale record; note is gone on the server
+    terse = "409 note agentscout/top changed since you read it\n"          # no "current value follows"
+    cap = PostCapture(server, [(409, {}, terse), (200, {}, "ok")])
+    client._fetch = cap                                                    # GETs (read_note) fall through to the 404 server
+    assert pub.write_note_cas("agentscout", "top", "v1", NOW) is True
+    assert cap.bodies[0] == {"value": "v1", "if": "v0"}                     # first tried a CAS against the stale value
+    assert cap.bodies[1] == {"value": "v1", "if_absent": True}             # recovered: recreate the reclaimed note
+    assert storage.published_note("agentscout", "top")["value"] == "v1"
 
 
 def test_409_with_our_own_value_means_the_timed_out_write_landed(server, client, storage, tmp_path, caplog):

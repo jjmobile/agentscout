@@ -42,6 +42,47 @@ def scored_for(storage):
     return lambda: render.score_all(storage, NOW)
 
 
+def test_attest_command_returns_a_verifiable_attestation(storage, tmp_path):
+    import json
+    from agentscout import attestation, formatter
+    from agentscout.identity import Identity, fingerprint
+    ident, _ = Identity.load_or_create(str(tmp_path / "id.key"))
+    s = Settings(db_path=str(tmp_path / "t.db"), dry_run=False, publish_enabled=True, replies_enabled=True,
+                 attest_enabled=True)
+    asker = Asker(s, storage, ident.did, live=True, identity=ident)
+    seed(storage, [(10, DID_B, f"SCOUT: attest {fingerprint(DID_A)}")])
+    assert asker.tick(NOW, scored_for(storage)) == 1
+    row = storage.outbox_has("agentscout", "AGENTSCOUT re#10")
+    assert row is not None and " attest " in row["text"]
+    # the requester reads the single-line-swept message; the embedded object must still verify
+    obj = json.loads(formatter.sweep(row["text"]).split("signed=", 1)[1])
+    v = attestation.verify(obj, now=NOW)
+    assert v.ok and v.subject == DID_A and obj["issuer"] == ident.did
+
+
+def test_attest_unknown_subject_is_insufficient_not_a_signed_object(storage, tmp_path):
+    from agentscout.identity import Identity
+    ident, _ = Identity.load_or_create(str(tmp_path / "id.key"))
+    s = Settings(db_path=str(tmp_path / "t.db"), dry_run=False, publish_enabled=True, replies_enabled=True,
+                 attest_enabled=True)
+    asker = Asker(s, storage, ident.did, live=True, identity=ident)
+    seed(storage, [(10, DID_B, "SCOUT: attest deadbeefdeadbeef")])     # never observed
+    asker.tick(NOW, scored_for(storage))
+    row = storage.outbox_has("agentscout", "AGENTSCOUT re#10")
+    assert row is not None and "insufficient" in row["text"] and "signed=" not in row["text"]
+
+
+def test_attest_off_by_default_is_declined(storage, tmp_path):
+    from agentscout.identity import Identity, fingerprint
+    ident, _ = Identity.load_or_create(str(tmp_path / "id.key"))
+    s = Settings(db_path=str(tmp_path / "t.db"), dry_run=False, publish_enabled=True, replies_enabled=True)
+    asker = Asker(s, storage, ident.did, live=True, identity=ident)          # attest_enabled defaults False
+    seed(storage, [(10, DID_B, f"SCOUT: attest {fingerprint(DID_A)}")])
+    asker.tick(NOW, scored_for(storage))
+    row = storage.outbox_has("agentscout", "AGENTSCOUT re#10")
+    assert row is not None and "not enabled" in row["text"] and "signed=" not in row["text"]
+
+
 def test_first_run_never_answers_a_backlog(storage, tmp_path):
     storage.set_setting("own_did", OWN)
     storage.insert_messages("agentscout", [(7, T(-5), DID_A, DID_A, True, "SCOUT: me", "x")], T(0))
