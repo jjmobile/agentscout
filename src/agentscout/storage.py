@@ -317,34 +317,17 @@ class Storage:
     # (at 300k+ messages a day that alone exceeded the container's memory).
     _SIGNED = "signed=1 AND sender_did IS NOT NULL AND ts>=?"
 
-    def iter_agent_stats(self, since: str) -> Iterable[sqlite3.Row]:
-        """Per signed agent: n, distinct UTC days, distinct text hashes, busiest UTC hour."""
+    def iter_signed_activity(self, since: str) -> Iterable[sqlite3.Row]:
+        """(did, ts, room, text_hash) of every signed message in the window, in messages_did index order: each agent's
+        rows arrive contiguously, oldest first, with no sorter (see census.build_facts)."""
         return self.conn.execute(
-            f"""SELECT s.did, s.n, s.days, s.hashes, h.max_per_hour FROM
-                 (SELECT sender_did AS did, COUNT(*) AS n, COUNT(DISTINCT substr(ts,1,10)) AS days,
-                         COUNT(DISTINCT text_hash) AS hashes FROM messages WHERE {self._SIGNED} GROUP BY sender_did) s
-                 JOIN (SELECT did, MAX(c) AS max_per_hour FROM
-                        (SELECT sender_did AS did, substr(ts,1,13) AS hr, COUNT(*) AS c FROM messages WHERE {self._SIGNED} GROUP BY 1,2)
-                       GROUP BY did) h ON h.did = s.did""", (since, since))
+            f"SELECT sender_did AS did, ts, room, text_hash FROM messages INDEXED BY messages_did WHERE {self._SIGNED} "
+            "ORDER BY sender_did, ts", (since,))
 
-    def iter_agent_rooms(self, since: str) -> Iterable[sqlite3.Row]:
-        """(did, room, n) for every signed agent/room pair in the window, ordered by did, room."""
+    def iter_latest_texts(self, since: str) -> Iterable[sqlite3.Row]:
+        """(did, start of its most recent signed message text), streamed — one row per identity in the window."""
         return self.conn.execute(
-            f"SELECT sender_did AS did, room, COUNT(*) AS n FROM messages WHERE {self._SIGNED} GROUP BY 1,2 ORDER BY 1,2", (since,))
-
-    def cross_room_identical(self, since: str) -> Dict[str, int]:
-        """did -> number of its texts posted to >= 3 different rooms."""
-        rows = self.conn.execute(
-            f"""SELECT sender_did AS did, COUNT(*) AS n FROM
-                 (SELECT sender_did, text_hash FROM messages WHERE {self._SIGNED} GROUP BY 1,2 HAVING COUNT(DISTINCT room) >= 3)
-                GROUP BY 1""", (since,))
-        return {r["did"]: int(r["n"]) for r in rows}
-
-    def latest_texts(self, since: str) -> Dict[str, str]:
-        """did -> (start of) its most recent signed message text."""
-        rows = self.conn.execute(
             f"SELECT sender_did AS did, substr(text,1,600) AS text, MAX(ts) FROM messages WHERE {self._SIGNED} GROUP BY sender_did", (since,))
-        return {r["did"]: r["text"] for r in rows}
 
     def iter_signed_texts(self, since: str) -> Iterable[sqlite3.Row]:
         return self.conn.execute(f"SELECT sender_did AS did, text FROM messages WHERE {self._SIGNED}", (since,))
@@ -426,6 +409,10 @@ class Storage:
 
     def notes_by_fp(self) -> Dict[str, sqlite3.Row]:
         return {r["fp"]: r for r in self.conn.execute("SELECT * FROM did_notes").fetchall()}
+
+    def iter_note_texts(self) -> Iterable[sqlite3.Row]:
+        """(fp, text) of every stored DID note, streamed (the table holds the whole network's notes)."""
+        return self.conn.execute("SELECT fp, text FROM did_notes")
 
     def note_fetch_queue(self, candidate_fps: Sequence[str], stale_before: str, limit: int) -> List[str]:
         """fps needing a fetch: agents seen in messages first, then the rest; missing before stale."""

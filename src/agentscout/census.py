@@ -195,20 +195,22 @@ def build_facts(storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS, 
     scored agents exactly as before (a one-shot replier has no preliminary score, so the sock-puppet ×0.25 applies).
     On 2026-08-26 (361k identities in the window, 63 % one-shot) this is the difference between fitting in 1 GB or not."""
     since = _since(now, window_days)
-    notes = storage.notes_by_fp()
+    rows = storage.agents_seen_since(since, min_msgs)
+    wanted = {row["fp"] for row in rows}
+    note_names: Dict[str, Optional[str]] = {}      # fp -> declared name; key present = a note exists. Only the scored
+    for r in storage.iter_note_texts():             # fps are kept: the table holds every DID note on the network (~250k).
+        if r["fp"] in wanted:
+            _, fields = parse_note(r["text"])
+            note_names[r["fp"]] = fields.get("name")
     owners = storage.owned_rooms_by_did()
     artifacts = storage.artifacts_by_did()
     summaries = storage.summaries_by_did()
 
     facts: Dict[str, AgentFacts] = {}
-    for row in storage.agents_seen_since(since, min_msgs):
+    for row in rows:
         did, fp = row["did"], row["fp"]
-        note = notes.get(fp)
-        name = None
-        if note:
-            _, fields = parse_note(note["text"])
-            name = fields.get("name")
-        f = AgentFacts(did=did, fp=fp, first_seen=row["first_seen"], last_seen=row["last_seen"], name=name, note_present=note is not None)
+        f = AgentFacts(did=did, fp=fp, first_seen=row["first_seen"], last_seen=row["last_seen"], name=note_names.get(fp),
+                       note_present=fp in note_names)
         f.owned_rooms = owners.get(did, [])
         f.artifacts_ok, f.artifacts_total = artifacts.get(did, (0, 0))
         sm = summaries.get(did)
@@ -221,28 +223,44 @@ def build_facts(storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS, 
         f.days_since_first_seen = max(0.0, (now - parse_ts(row["first_seen"])).total_seconds() / 86400.0)
         facts[did] = f
 
-    # ---- per-agent aggregates, computed inside SQLite ----------------------------------------------
-    for r in storage.iter_agent_stats(since):
-        f = facts.get(r["did"])
-        if f is None:
+    # ---- per-agent aggregates: one streaming pass in (sender, ts) index order ------------------------
+    # SQLite's GROUP BY (did, room) / (did, hour) / (did, hash) over the window builds in-memory sorters the size
+    # of the window (temp_store=MEMORY; ~1 GB at 6M messages on 2026-09-07). Walking the messages_did index instead
+    # delivers each agent's rows contiguously, so the per-agent scratch below is tiny and reset per agent.
+    def flush(f: Optional[AgentFacts], n: int, days: set, hashes: Dict[str, set], hours: Dict[str, int], rooms: Dict[str, int]) -> None:
+        if f is None or not n:
+            return
+        f.signed_msgs = n
+        f.days_seen = len(days)
+        f.dup_ratio = 1.0 - len(hashes) / n
+        f.max_per_hour = max(hours.values())
+        for room in sorted(rooms):
+            f.rooms.append(room)
+            if rooms[room] >= 2:
+                f.rooms_active.append(room)
+        f.cross_room_identical = sum(1 for seen in hashes.values() if len(seen) >= 3)
+
+    cur_did, cur_f, n = None, None, 0
+    days: set = set(); hashes: Dict[str, set] = {}; hours: Dict[str, int] = {}; rooms: Dict[str, int] = {}
+    for r in storage.iter_signed_activity(since):
+        did = r["did"]
+        if did != cur_did:
+            flush(cur_f, n, days, hashes, hours, rooms)
+            cur_did, cur_f, n = did, facts.get(did), 0
+            days, hashes, hours, rooms = set(), {}, {}, {}
+        if cur_f is None:                             # unscored one-shot identity: nothing to aggregate
             continue
-        f.signed_msgs = int(r["n"])
-        f.days_seen = int(r["days"])
-        f.dup_ratio = 1.0 - int(r["hashes"]) / f.signed_msgs
-        f.max_per_hour = int(r["max_per_hour"])
-    for r in storage.iter_agent_rooms(since):        # ordered by did, room
-        f = facts.get(r["did"])
-        if f is None:
-            continue
-        f.rooms.append(r["room"])
-        if int(r["n"]) >= 2:
-            f.rooms_active.append(r["room"])
-    for did, n in storage.cross_room_identical(since).items():
-        if did in facts:
-            facts[did].cross_room_identical = n
-    for did, text in storage.latest_texts(since).items():
-        if did in facts:
-            facts[did].sample = " ".join(text.split())[:140]
+        n += 1
+        ts = r["ts"]
+        days.add(ts[:10])
+        hours[ts[:13]] = hours.get(ts[:13], 0) + 1
+        rooms[r["room"]] = rooms.get(r["room"], 0) + 1
+        hashes.setdefault(r["text_hash"], set()).add(r["room"])
+    flush(cur_f, n, days, hashes, hours, rooms)
+    for r in storage.iter_latest_texts(since):      # streamed: one row per identity in the window (2M on 2026-09-07);
+        f = facts.get(r["did"])                     # a dict of them was ~1 GB and OOM-killed the container
+        if f is not None:
+            f.sample = " ".join(r["text"].split())[:140]
 
     # ---- per-message text features: one streaming pass ---------------------------------------------
     handle_counts: Dict[str, Dict[str, int]] = {}
@@ -277,7 +295,7 @@ def build_facts(storage, now: datetime, window_days: int = DEFAULT_WINDOW_DAYS, 
     #     neither message a "[Role @handle]" broadcast, replier not a broadcaster; once per replier per target per day.
     # Discounts: reciprocal naming the same day ×0.25; young/weak replier (sock-puppet) ×0.25.
     # Caps: ≤3 per replier per target per day, ≤20 per replier per day overall.
-    index = _reference_index(facts, notes)
+    index = _reference_index(facts)
     rates = room_rates(storage.room_stats(since))
     own = storage.get_setting("own_did")      # AgentScout's own answers must never count as replies (ask → answered → score up)
     named_pairs = set()                       # (replier, target, day) for reciprocity
@@ -362,7 +380,7 @@ def apply_replies(facts: Dict[str, AgentFacts], credits: List[Credit], named_pai
         f.replies_weighted += min(f.replies_weighted_adj, ADJACENCY_CAP)
 
 
-def _reference_index(facts: Dict[str, "AgentFacts"], notes: Dict[str, object]) -> Dict[str, Dict[str, str]]:
+def _reference_index(facts: Dict[str, "AgentFacts"]) -> Dict[str, Dict[str, str]]:
     """Lookup tables from the ways agents are referred to → DID. Ambiguous keys (shared by >1 DID) are dropped."""
     tables: Dict[str, Dict[str, str]] = {"did": {}, "z8": {}, "last4": {}, "fp": {}, "handle": {}}
     clash: Dict[str, set] = defaultdict(set)

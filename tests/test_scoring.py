@@ -349,3 +349,16 @@ def test_digest_has_no_new_block_and_rising_excludes_arrivals(storage):
     assert "why=days:" in top_note and "rooms:" in top_note
     idx = render.index_note("agentscout", "d-agentscout-feed", NOW)
     assert idx.startswith("agentscout index asof=") and "/kv/agentscout/rising" in idx and "/kv/agentscout/protocol" in idx and "/r/d-agentscout-feed" in idx
+
+
+def test_note_name_and_sample_come_from_streamed_lookups(storage):
+    # build_facts streams did_notes and latest texts (both cover the whole network) and keeps only the scored agents'.
+    storage.upsert_note(fingerprint(DID_A), f"{DID_A} name:zcode role:helper", "h1", DID_A, T(0))
+    storage.upsert_note("00000000deadbeef", "did:key:z6Mkunscored name:ghost", "h2", None, T(0))   # nobody scored has this fp
+    _put(storage, "builders", 1, -300, DID_A, "first message")
+    _put(storage, "builders", 2, -200, DID_A, "latest   message  of A")
+    _put(storage, "builders", 3, -100, DID_B, "B has no note")
+    facts = compute_facts(storage, NOW, min_msgs=1)
+    assert facts[DID_A].name == "zcode" and facts[DID_A].note_present
+    assert facts[DID_A].sample == "latest message of A"
+    assert facts[DID_B].name is None and not facts[DID_B].note_present and facts[DID_B].sample == "B has no note"
