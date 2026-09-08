@@ -111,6 +111,17 @@ MIGRATIONS: List[str] = [
         contract TEXT, accept_json TEXT, state TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     """,
+    # 8: W1 — payee-side tclk/1 deals (we accept other agents' offers, deliver, reveal)
+    """
+    CREATE TABLE worker_deals (
+        contract TEXT PRIMARY KEY, day TEXT NOT NULL, offer_id TEXT NOT NULL, payer TEXT NOT NULL,
+        offer_json TEXT NOT NULL, accept_json TEXT NOT NULL, secret TEXT NOT NULL,
+        family TEXT NOT NULL, answer TEXT NOT NULL, state TEXT NOT NULL,
+        lock_ref TEXT, grade TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX worker_deals_state ON worker_deals(state);
+    CREATE INDEX worker_deals_day ON worker_deals(day);
+    """,
 ]
 
 
@@ -533,6 +544,48 @@ class Storage:
             "accept_json=COALESCE(excluded.accept_json, accept_json), "
             "state=excluded.state, updated_at=excluded.updated_at",
             (day, offer_id, offer_json, contract, accept_json, state, now))
+
+    # ---- worker deals (W1) ----------------------------------------------------------------
+    def worker_insert(self, contract: str, day: str, offer_id: str, payer: str, offer_json: str,
+                      accept_json: str, secret: str, family: str, answer: str, now: str) -> None:
+        self.conn.execute(
+            "INSERT OR IGNORE INTO worker_deals(contract,day,offer_id,payer,offer_json,accept_json,secret,family,"
+            "answer,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'accepted',?,?)",
+            (contract, day, offer_id, payer, offer_json, accept_json, secret, family, answer, now, now))
+
+    def worker_set_state(self, contract: str, state: str, now: str, lock_ref: Optional[str] = None,
+                         grade: Optional[str] = None) -> None:
+        self.conn.execute(
+            "UPDATE worker_deals SET state=?, updated_at=?, lock_ref=COALESCE(?, lock_ref), grade=COALESCE(?, grade) "
+            "WHERE contract=?", (state, now, lock_ref, grade, contract))
+
+    def worker_open(self) -> List[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM worker_deals WHERE state IN ('accepted','locked','revealed') ORDER BY created_at").fetchall()
+
+    def worker_has_offer(self, offer_id: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM worker_deals WHERE offer_id=?", (offer_id,)).fetchone() is not None
+
+    def worker_counts(self, day: str) -> Tuple[int, Dict[str, int]]:
+        """(deals accepted today, per-payer count today)."""
+        per: Dict[str, int] = {}
+        for r in self.conn.execute("SELECT payer, COUNT(*) AS n FROM worker_deals WHERE day=? GROUP BY payer", (day,)):
+            per[r["payer"]] = int(r["n"])
+        return sum(per.values()), per
+
+    def worker_stats(self, day: Optional[str] = None) -> Dict[str, int]:
+        q = "SELECT state, COUNT(*) AS n FROM worker_deals" + (" WHERE day=?" if day else "") + " GROUP BY state"
+        return {r["state"]: int(r["n"]) for r in self.conn.execute(q, (day,) if day else ())}
+
+    def iter_room_after_seq(self, room: str, after_seq: int, limit: int = 2000) -> List[sqlite3.Row]:
+        """Signed messages of one room with seq > after_seq, oldest first (bounded)."""
+        return self.conn.execute(
+            "SELECT seq, ts, sender_did AS did, text FROM messages WHERE signed=1 AND sender_did IS NOT NULL "
+            "AND room=? AND seq>? ORDER BY seq LIMIT ?", (room, after_seq, limit)).fetchall()
+
+    def room_last_seq(self, room: str) -> int:
+        row = self.conn.execute("SELECT MAX(seq) AS s FROM messages WHERE room=?", (room,)).fetchone()
+        return int(row["s"] or 0)
 
     def iter_room_messages(self, room: str, since: str) -> Iterable[sqlite3.Row]:
         """Signed messages of one room since `since`, oldest first. Used by census.credence_stats."""

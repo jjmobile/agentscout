@@ -36,9 +36,10 @@ _KEYS = {
                ["from", "ref", "statement", "nonce", "contract"]),
     "lock": (["type", "from", "contract", "rail", "ref", "presig"],
              ["from", "contract", "rail", "ref"]),
-    "reveal": (["type", "from", "contract", "secret"], ["from", "contract", "secret"]),
-    "refund": (["type", "from", "contract"], ["from", "contract"]),
-    "cancel": (["type", "from", "contract"], ["from", "contract"]),
+    "reveal": (["type", "from", "contract", "secret", "ref"], ["from", "contract", "secret"]),
+    "refund": (["type", "from", "contract", "ref", "reason"], ["from", "contract"]),
+    "cancel": (["type", "from", "contract", "reason"], ["from", "contract"]),
+    "heartbeat": (["type", "from", "contract", "nonce", "note"], ["from", "contract", "nonce"]),
     "receipt": (["type", "from", "contract", "outcome", "rail", "ref"],
                 ["from", "contract", "outcome"]),
 }
@@ -107,6 +108,21 @@ def make_frame(type_: str, from_did: str, contract: str, **extra) -> Dict:
     return validate_frame({"type": type_, "from": from_did, "contract": contract, **extra})
 
 
+def make_accept(offer: Dict, from_did: str, statement: str, nonce: Optional[str] = None) -> Dict:
+    """The payee half: accept someone's offer with our hash statement; the contract id binds both."""
+    core = {"from": from_did, "ref": offer["id"], "statement": statement, "nonce": nonce or secrets.token_hex(8)}
+    frame = dict(core, type="accept")
+    frame["contract"] = contract_id(offer, core)
+    return validate_frame(frame)
+
+
+def make_heartbeat(from_did: str, contract: str, note: Optional[str] = None) -> Dict:
+    frame = {"type": "heartbeat", "from": from_did, "contract": contract, "nonce": secrets.token_hex(8)}
+    if note:
+        frame["note"] = note
+    return validate_frame(frame)
+
+
 def validate_frame(value) -> Dict:
     """Fail-closed: unknown type, unknown key, missing field or malformed value rejects."""
     if not isinstance(value, dict):
@@ -153,9 +169,11 @@ def validate_frame(value) -> Dict:
             _fail("nonce must be 16 hex chars")
         if not _HEX64.fullmatch(str(value["contract"])):
             _fail("contract must be a 32-byte hex id")
-    elif t in ("lock", "reveal", "refund", "cancel", "receipt"):
+    elif t in ("lock", "reveal", "refund", "cancel", "receipt", "heartbeat"):
         if not _HEX64.fullmatch(str(value["contract"])):
             _fail("contract must be a 32-byte hex id")
+        if t == "heartbeat" and not _NONCE.fullmatch(str(value["nonce"])):
+            _fail("heartbeat nonce must be 16 hex chars")
         if t == "lock" and (not isinstance(value["rail"], str) or not value["rail"] or not value["ref"]):
             _fail("lock needs rail and ref")
         if t == "reveal" and not _HEX64.fullmatch(str(value["secret"])):
@@ -264,6 +282,10 @@ def apply_frame(state: Dict, frame: Dict, now_ms: int) -> Tuple[Dict, bool, str]
         if frame["from"] not in (payer, payee):
             return state, False, "cancel from a non-party"
         return dict(state, state="cancelled"), True, "cancelled"
+    if t == "heartbeat":
+        if s in ("accepted", "locked") and frame["from"] in (payer, payee):
+            return state, True, "heartbeat"
+        return state, False, "heartbeat out of turn or from a non-party"
     if t == "receipt":
         return state, False, "receipt makes no transition"
     return state, False, f"no transition for {t} in {s}"

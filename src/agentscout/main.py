@@ -42,6 +42,7 @@ class Runner:
         self.asker: Optional[Asker] = None
         self.commerce = None
         self.selfaudit = None
+        self.worker = None
         self._sleep = sleep
         self._now = clock
         self.stop = False
@@ -64,6 +65,11 @@ class Runner:
             from .commerce import Commerce
             self.commerce = Commerce(self.s, self.client, self.db, ident, self.publisher)
             log.info("tclk commerce enabled: one paper deal per day in /r/%s", self.s.tclk_offers_room)
+        if self.s.worker_enabled and self.s.will_publish:
+            from .worker import Worker
+            self.worker = Worker(self.s, self.client, self.db, ident, self.publisher, lambda: self._scored)
+            log.info("tclk worker enabled: up to %d deals/day, %d open, deterministic jobs only",
+                     self.s.worker_max_per_day, self.s.worker_max_open)
         if self.s.will_publish:
             self.publisher.verify_ownership()
             self.asker = Asker(self.s, self.db, ident.did, live=self.s.replies_enabled, identity=ident)
@@ -136,6 +142,8 @@ class Runner:
             self.publisher.tick(now, scored)
         if self.commerce is not None:
             self.commerce.tick(now)
+        if self.worker is not None and self.worker.tick(now) and self.publisher is not None:
+            self.publisher.flush_outbox(now)          # accept/deliver within the same cycle: offers are short-lived
         if self.selfaudit is not None:
             self.selfaudit.tick(now)
         if self.asker is not None:
