@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional
 
 from . import jobs, tclk
@@ -33,6 +33,7 @@ MAX_ACCEPTS_PER_TICK = 2
 # that flag says nothing about a mill payer. Only prompt-injection is disqualifying here.
 SCREEN_FLAGS = ("injection",)
 RECEIPT_GRACE_MS = 30 * 60 * 1000
+PARKED_RETRY = timedelta(minutes=3)
 _REVIEW_RE = re.compile(r"\breview\b.*\b(PASS|FAIL)\b")
 
 
@@ -92,6 +93,7 @@ class Worker:
                         "worker: %s %s (%s) grade=%s", contract[:18], final, row["family"], grade)
                 return False
         if state == "accepted":
+            self._retry_parked(room, f"wk-hb-{contract[:18]}", now)
             lock = next((f for f in frames if f["type"] == "lock" and f.get("rail") in offer["rails"]), None)
             if lock is None:
                 if t > offer["claimByMs"]:
@@ -106,6 +108,19 @@ class Worker:
             self.db.worker_set_state(contract, "unreceipted", iso(now))
             log.info("worker: %s revealed but no receipt before refundAfter+grace", contract[:18])
         return False
+
+    def _retry_parked(self, room: str, marker: str, now: datetime) -> None:
+        """The venue refuses a write that would create a new room while its room cap is full (400 'room
+        limit'); the outbox parks such rows as WAITING_ROOM and never retries them by itself. Capacity
+        frees up as idle rooms are reclaimed, so retry a parked deal-room write every few minutes while
+        the deal is alive."""
+        row = self.db.outbox_has(room, marker)
+        if row is None or row["state"] != "WAITING_ROOM":
+            return
+        parked_at = datetime.strptime(row["updated_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        if now - parked_at >= PARKED_RETRY:
+            self.db.outbox_update(row["id"], "PENDING", iso(now))
+            log.info("worker: retrying parked %s in %s", row["kind"], room)
 
     def _deliver(self, row, contract: str, room: str, lock_ref: Optional[str], now: datetime) -> bool:
         answer = row["answer"]

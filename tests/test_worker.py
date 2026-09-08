@@ -137,3 +137,19 @@ def test_lapses_when_the_payer_never_locks(server, client, storage, tmp_path):
     assert w.tick(NOW) is True
     assert w.tick(NOW + timedelta(minutes=40)) is False
     assert storage.worker_open() == [] and storage.worker_stats() == {"lapsed": 1}
+
+
+def test_parked_heartbeat_is_retried_while_the_deal_is_alive(server, client, storage, tmp_path):
+    s, ident, pub, w = make_worker(client, storage, tmp_path)
+    storage.set_setting(SEQ_SETTING, "0")
+    server.route("/kv/tclk-job-en/inf-1", 200, SPEC)
+    put_offer(storage, 7, board_offer("x"), "inference | … | full spec: /kv/tclk-job-en/inf-1")
+    assert w.tick(NOW) is True
+    contract = storage.worker_open()[0]["contract"]
+    room = tclk.deal_room(contract)
+    hb = storage.outbox_has(room, f"wk-hb-{contract[:18]}")
+    storage.outbox_update(hb["id"], "WAITING_ROOM", NOW.strftime("%Y-%m-%dT%H:%M:%SZ"), error="400 room limit reached")
+    w.tick(NOW + timedelta(minutes=1))
+    assert storage.outbox_has(room, f"wk-hb-{contract[:18]}")["state"] == "WAITING_ROOM"     # too early
+    w.tick(NOW + timedelta(minutes=4))
+    assert storage.outbox_has(room, f"wk-hb-{contract[:18]}")["state"] == "PENDING"          # retried
