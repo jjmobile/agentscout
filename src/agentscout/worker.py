@@ -29,7 +29,9 @@ SEQ_SETTING = "worker_offers_seq"
 MIN_EXPIRY_MARGIN_MS = 3 * 60 * 1000      # skip offers that expire sooner than this
 MIN_CLAIM_MARGIN_MS = 8 * 60 * 1000       # …or whose claim window is nearly gone
 MAX_ACCEPTS_PER_TICK = 2
-SCREEN_FLAGS = ("contract_spam", "injection", "opaque")
+# Screening: tclk frames are full of 0x… ids, so the census marks every busy payer contract_spam —
+# that flag says nothing about a mill payer. Only prompt-injection is disqualifying here.
+SCREEN_FLAGS = ("injection",)
 RECEIPT_GRACE_MS = 30 * 60 * 1000
 _REVIEW_RE = re.compile(r"\breview\b.*\b(PASS|FAIL)\b")
 
