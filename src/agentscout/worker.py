@@ -136,8 +136,9 @@ class Worker:
                 return False                      # still posting; try again next cycle
             answer = f"attested seq {seq}"
         self.pub._enqueue("worker-deliver", f"wk-deliver-{c18}", answer, now, room=room)
-        reveal = tclk.make_frame("reveal", self.id.did, contract, secret=row["secret"],
-                                 **({"ref": lock_ref} if lock_ref else {}))
+        # No `ref` on the reveal: it is optional in tclk/1, the mill's graders folded our ref-carrying reveals as
+        # "no reveal" (2 refunds on 2026-09-08), and every PASS-graded worker transcript omits it.
+        reveal = tclk.make_frame("reveal", self.id.did, contract, secret=row["secret"])
         self.pub._enqueue("worker-reveal", f"wk-reveal-{c18}", tclk.encode_frame(reveal), now, room=room)
         self.db.worker_set_state(contract, "revealed", iso(now))
         log.info("worker: %s delivered (%s) and revealed", c18, row["family"])

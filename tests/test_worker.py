@@ -78,7 +78,7 @@ def test_accept_deliver_reveal_and_claim(server, client, storage, tmp_path):
     assert d["state"] == "revealed" and d["lock_ref"] == "tx-1"
     assert storage.outbox_has(room, f"wk-deliver-{contract[:18]}")["text"] == "12, 14"
     reveal = tclk.decode_frame(storage.outbox_has(room, f"wk-reveal-{contract[:18]}")["text"])
-    assert reveal["secret"] == d["secret"] and reveal["ref"] == "tx-1"
+    assert reveal["secret"] == d["secret"] and "ref" not in reveal
     # the payer's receipt + review line close the deal with its grade
     receipt = tclk.make_frame("receipt", PAYER, contract, outcome="claimed", rail="paper", ref="tx-1")
     server.route(f"/r/{room}?format=json&limit=100", 200, room_json(room, [

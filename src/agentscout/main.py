@@ -128,6 +128,8 @@ class Runner:
         if new_rooms:
             log.info("events: %d new public rooms announced", new_rooms)
         self.ing.poll_rooms(now, deadline=deadline)
+        if self.worker is not None and self.worker.tick(now) and self.publisher is not None:
+            self.publisher.flush_outbox(now)          # accept right after the board was read: offers are a race
         if time.monotonic() < deadline:
             self.ing.scan_notes(now)
             self.ing.check_artifacts(now)
@@ -142,8 +144,6 @@ class Runner:
             self.publisher.tick(now, scored)
         if self.commerce is not None:
             self.commerce.tick(now)
-        if self.worker is not None and self.worker.tick(now) and self.publisher is not None:
-            self.publisher.flush_outbox(now)          # accept/deliver within the same cycle: offers are short-lived
         if self.selfaudit is not None:
             self.selfaudit.tick(now)
         if self.asker is not None:
