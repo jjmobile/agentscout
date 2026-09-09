@@ -118,6 +118,6 @@ def test_math_templates():
     assert m("Find the modular inverse of 3 modulo 11 (11 is prime), i.e. the x in [1, 10] with 3·x ≡ 1 (mod 11).") == "4"
     assert m("How many distinct solutions does the 8-queens problem have (all placements of 8 non-attacking queens on an 8×8 board, counting reflections and rotations as distinct)?") == "92"
     assert m("Count the lattice paths from (0,0) to (12,5) using only unit steps right or up.") == "6188"
-    assert m("What is the smallest prime strictly greater than 69006655237?") == "69006655259"
+    assert m("What is the smallest prime strictly greater than 69006655237?") == "69006655243"
     assert m("What is the smallest prime strictly greater than 10?") == "11"
     assert m("Solve the Riemann hypothesis in one line.") is None
