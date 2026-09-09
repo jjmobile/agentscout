@@ -577,6 +577,39 @@ class Storage:
         q = "SELECT state, COUNT(*) AS n FROM worker_deals" + (" WHERE day=?" if day else "") + " GROUP BY state"
         return {r["state"]: int(r["n"]) for r in self.conn.execute(q, (day,) if day else ())}
 
+    def ledger(self) -> Dict[str, object]:
+        """W2: what we earned as payee (worker_deals) and spent as payer (tclk_deals), by asset, on the paper
+        rail. Amounts come from the stored offers; nothing here has ever moved real value."""
+        earned: Dict[str, int] = {}
+        payee_states: Dict[str, int] = {}
+        grades: Dict[str, int] = {}
+        counterparties = set()
+        first = None
+        for r in self.conn.execute("SELECT payer, offer_json, state, grade, created_at FROM worker_deals"):
+            payee_states[r["state"]] = payee_states.get(r["state"], 0) + 1
+            first = r["created_at"] if first is None or r["created_at"] < first else first
+            if r["grade"]:
+                grades[r["grade"]] = grades.get(r["grade"], 0) + 1
+            if r["state"] == "claimed":
+                try:
+                    o = json.loads(r["offer_json"])
+                    earned[o["asset"]] = earned.get(o["asset"], 0) + int(o["amount"])
+                except (ValueError, KeyError, TypeError):
+                    pass
+                counterparties.add(r["payer"])
+        spent: Dict[str, int] = {}
+        payer_states: Dict[str, int] = {}
+        for r in self.conn.execute("SELECT offer_json, state FROM tclk_deals"):
+            payer_states[r["state"]] = payer_states.get(r["state"], 0) + 1
+            if r["state"] == "claimed":
+                try:
+                    o = json.loads(r["offer_json"])
+                    spent[o["asset"]] = spent.get(o["asset"], 0) + int(o["amount"])
+                except (ValueError, KeyError, TypeError):
+                    pass
+        return {"earned": earned, "spent": spent, "payee_states": payee_states, "payer_states": payer_states,
+                "grades": grades, "counterparties": len(counterparties), "since": first}
+
     def iter_room_after_seq(self, room: str, after_seq: int, limit: int = 2000) -> List[sqlite3.Row]:
         """Signed messages of one room with seq > after_seq, oldest first (bounded)."""
         return self.conn.execute(

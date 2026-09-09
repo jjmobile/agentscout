@@ -153,3 +153,24 @@ def test_parked_heartbeat_is_retried_while_the_deal_is_alive(server, client, sto
     assert storage.outbox_has(room, f"wk-hb-{contract[:18]}")["state"] == "WAITING_ROOM"     # too early
     w.tick(NOW + timedelta(minutes=4))
     assert storage.outbox_has(room, f"wk-hb-{contract[:18]}")["state"] == "PENDING"          # retried
+
+
+def test_ledger_counts_both_sides_of_the_paper_rail(storage):
+    from agentscout import render
+    assert render.ledger_line(storage) == ""                     # nothing to account for yet
+    offer = json.dumps({"amount": "400", "asset": "FLOP"})
+    storage.worker_insert("0x" + "11" * 32, "2026-09-08", "0xo1", "did:key:z6Mkpayer1", offer, "{}", "0x" + "aa" * 32, "inference", "1, 2", "2026-09-08T10:00:00Z")
+    storage.worker_set_state("0x" + "11" * 32, "claimed", "2026-09-08T10:30:00Z", grade="PASS")
+    storage.worker_insert("0x" + "22" * 32, "2026-09-08", "0xo2", "did:key:z6Mkpayer2", offer, "{}", "0x" + "bb" * 32, "census", "x", "2026-09-08T11:00:00Z")
+    storage.worker_set_state("0x" + "22" * 32, "lapsed", "2026-09-08T11:40:00Z")
+    storage.worker_insert("0x" + "33" * 32, "2026-09-09", "0xo3", "did:key:z6Mkpayer1", json.dumps({"amount": "200", "asset": "FLOP"}), "{}", "0x" + "cc" * 32, "verification", "3", "2026-09-09T01:00:00Z")
+    storage.worker_set_state("0x" + "33" * 32, "claimed", "2026-09-09T01:10:00Z", grade="FAIL")
+    storage.tclk_upsert("2026-09-07", "0xoffer", json.dumps({"amount": "1000000", "asset": "FLOP"}), "refunded", "2026-09-07T07:00:00Z")
+    storage.tclk_upsert("2026-09-08", "0xoffer2", json.dumps({"amount": "1000000", "asset": "FLOP"}), "claimed", "2026-09-08T07:00:00Z")
+    L = storage.ledger()
+    assert L["earned"] == {"FLOP": 600} and L["spent"] == {"FLOP": 1000000} and L["counterparties"] == 1
+    line = render.ledger_line(storage)
+    assert line.startswith("💼 Ledger (paper rail, settles nothing): earned 600 FLOP over 2 claimed deals as worker")
+    assert "1 lapsed" in line and "PASS 1 / FAIL 1" in line and "spent 1,000,000 FLOP over 1 claimed deals as payer (1 refunded" in line
+    note = render.ledger_note("agentscout", storage, NOW)
+    assert note.startswith("agentscout ledger asof=") and "earned=600 FLOP" in note and "since=2026-09-08" in note and "graded_fail=1" in note

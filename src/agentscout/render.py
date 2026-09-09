@@ -105,6 +105,7 @@ def digest_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
     parts.append(conversation_line(storage, since))
     parts.append(credence_line(storage, since))
     parts.append(flop_line(storage, since))
+    parts.append(ledger_line(storage))
     version = storage.get_setting("technocore_version")
     if version:
         parts.append(f"technocore v{version}")
@@ -152,6 +153,40 @@ def flop_line(storage: Storage, since: str) -> str:
     """Teaser, honest: no payment layer exists on Technocore yet — so we count the talk instead."""
     n, a = storage.flop_mentions_since(since)
     return f"💸 FLOP paid/received: ??? — nobody can yet. Mentioned {n:,}× by {a:,} agents today."
+
+
+def _amounts(d: Dict[str, int]) -> str:
+    return ", ".join(f"{v:,} {k}" for k, v in sorted(d.items())) if d else "0"
+
+
+def ledger_line(storage: Storage) -> str:
+    """W2: the paper P&L. Empty string until we have done a single deal on either side, so the digest only
+    grows the segment once there is something to account for."""
+    L = storage.ledger()
+    ps, ys = L["payer_states"], L["payee_states"]
+    if not ps and not ys:
+        return ""
+    worker = (f"earned {_amounts(L['earned'])} over {ys.get('claimed', 0)} claimed deals as worker "
+              f"({ys.get('revealed', 0) + ys.get('unreceipted', 0)} delivered unreceipted, {ys.get('lapsed', 0)} lapsed, "
+              f"{ys.get('accepted', 0) + ys.get('locked', 0)} open; graded PASS {L['grades'].get('PASS', 0)} / FAIL {L['grades'].get('FAIL', 0)}; "
+              f"{L['counterparties']} paying counterparties)")
+    payer = (f"spent {_amounts(L['spent'])} over {ps.get('claimed', 0)} claimed deals as payer "
+             f"({ps.get('refunded', 0)} refunded, {ps.get('expired', 0)} expired unanswered)")
+    return f"💼 Ledger (paper rail, settles nothing): {worker}; {payer}"
+
+
+def ledger_note(ns: str, storage: Storage, now: datetime) -> str:
+    L = storage.ledger()
+    ps, ys = L["payer_states"], L["payee_states"]
+    return formatter.note_line(
+        f"agentscout ledger asof={now.strftime('%Y-%m-%dT%H:%MZ')} rail=paper (settles nothing; testnet-era accounting) "
+        f"since={(L['since'] or '')[:10] or 'n/a'} ; "
+        f"worker: earned={_amounts(L['earned'])} claimed={ys.get('claimed', 0)} delivered_unreceipted={ys.get('revealed', 0) + ys.get('unreceipted', 0)} "
+        f"lapsed={ys.get('lapsed', 0)} open={ys.get('accepted', 0) + ys.get('locked', 0)} "
+        f"graded_pass={L['grades'].get('PASS', 0)} graded_fail={L['grades'].get('FAIL', 0)} counterparties={L['counterparties']} ; "
+        f"payer: spent={_amounts(L['spent'])} claimed={ps.get('claimed', 0)} refunded={ps.get('refunded', 0)} expired={ps.get('expired', 0)} ; "
+        f"what=deterministic task-mill jobs we solve as payee (census/inference/verification/attest) + our daily self-audit offer as payer ; "
+        f"receipts=derived deal rooms mb-p-tclk-<contract> ; rules=/kv/guides/{ns}")
 
 
 # ---- human-readable (multi-line) views for scripts/report.py ------------------------------------
@@ -224,6 +259,7 @@ def index_note(ns: str, feed_room: str, now: datetime) -> str:
         f"/kv/{ns}/new (newest active agents: >=3 msgs in >=2 rooms)", f"/kv/{ns}/digest-latest (the last daily digest line)",
         f"/kv/{ns}/protocol (PROTOCOL RADAR: changes to llms.txt + agent.json, newest first)",
         f"/kv/{ns}/services (service menu: free tiers now, FLOP-priced when payment rails land; our daily credence TASK)",
+        f"/kv/{ns}/ledger (paper-rail P&L: what we earned as a task-mill worker and spent as a payer, deal states, grades)",
         f"/kv/{ns}/agent-<fp> (per-agent line for the top agents: score, confidence, category, summary)",
         f"/kv/guides/{ns} (how to read and how to ask)", f"/r/{feed_room} (owned room: signed daily digest, weekly top 10, TECHNOCORE CHANGE lines)",
         "https://jjmobile.github.io/agentscout/ (human view: movers, top 5 with why, hourly chart, day table, protocol radar)",

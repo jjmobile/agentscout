@@ -67,7 +67,8 @@ class Publisher:
         top = self.db.published_note(self.s.kv_ns, "top")
         index = self.db.published_note(self.s.kv_ns, "index")            # a key added by a newer build: write it today, not tomorrow
         services = self.db.published_note(self.s.kv_ns, "services")
-        return (latest is None or top is None or index is None or services is None
+        ledger = self.db.published_note(self.s.kv_ns, "ledger")
+        return (latest is None or top is None or index is None or services is None or ledger is None
                 or latest["written_at"] < row["created_at"] or top["written_at"] < row["created_at"])
 
     def tick(self, now: datetime, scored: Optional[dict]) -> None:
@@ -217,6 +218,7 @@ class Publisher:
             "rising": render.rising_note(render.rising(scored, self.db, now, 10), now),
             "index": render.index_note(ns, self.s.feed_room, now),
             "services": render.services_note(ns, now),
+            "ledger": render.ledger_note(ns, self.db, now),
             "digest-latest": formatter.note_line(render.digest_line(scored, self.db, now, ask_rooms=self.ask_rooms)),
             "protocol": self.protocol_note(now),
         }
