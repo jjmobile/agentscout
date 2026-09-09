@@ -421,7 +421,7 @@ def conversation_index(storage, since: str, own: Optional[str] = None) -> Conver
     msgs: List[Tuple[str, str, List[Tuple[str, str]]]] = []       # (room, sender, [(kind, key)])
     need: Dict[str, set] = {"did": set(), "z8": set(), "last4": set()}
     for r in storage.iter_did_mentions(since):
-        if r["did"] == own:
+        if r["did"] == own or is_settlement_frame(r["text"]):
             continue
         toks: List[Tuple[str, str]] = []
         for m in _TOKEN_DID_RE.findall(r["text"]):
@@ -453,6 +453,50 @@ def conversation_index(storage, since: str, own: Optional[str] = None) -> Conver
             pairs.setdefault((room, a, b), set()).add(sender)
     idx.answered = sum(1 for who in pairs.values() if len(who) == 2)
     return idx
+
+
+SETTLEMENT_PREFIXES = ("tclk1 {", "tclk deal ")
+
+
+def is_settlement_frame(text: str) -> bool:
+    """tclk/1 frames name counterparties by DID in every offer/accept/lock/reveal/receipt, so since 2026-09-07
+    (≈300k frames a day) they dominated the 'addressed another agent' count. They are settlement traffic, not
+    conversation, and are counted separately by settlement_stats."""
+    return text.startswith(SETTLEMENT_PREFIXES)
+
+
+@dataclass
+class SettlementStats:
+    frames: int = 0
+    offers: int = 0
+    accepts: int = 0
+    locks: int = 0
+    reveals: int = 0
+    claimed: int = 0        # receipts with outcome=claimed
+    refunds: int = 0
+    payers: int = 0         # distinct offerers
+    workers: int = 0        # distinct accepters
+
+
+def settlement_stats(storage, since: str) -> SettlementStats:
+    """tclk/1 frame counts over the window, straight from SQL (no grouping, memory O(1))."""
+    st = SettlementStats()
+    rows = storage.conn.execute(
+        f"""SELECT
+              COUNT(*) AS frames,
+              SUM(text LIKE '%"type":"offer"%') AS offers,
+              SUM(text LIKE '%"type":"accept"%') AS accepts,
+              SUM(text LIKE '%"type":"lock"%') AS locks,
+              SUM(text LIKE '%"type":"reveal"%') AS reveals,
+              SUM(text LIKE '%"outcome":"claimed"%') AS claimed,
+              SUM(text LIKE '%"type":"refund"%') AS refunds,
+              COUNT(DISTINCT CASE WHEN text LIKE '%"type":"offer"%' THEN sender_did END) AS payers,
+              COUNT(DISTINCT CASE WHEN text LIKE '%"type":"accept"%' THEN sender_did END) AS workers
+            FROM messages WHERE {storage._SIGNED} AND text LIKE 'tclk1 {{%'""", (since,)).fetchone()
+    if rows and rows["frames"]:
+        for k in ("frames", "offers", "accepts", "locks", "reveals", "claimed", "refunds", "payers", "workers"):
+            setattr(st, k, int(rows[k] or 0))
+    return st
 
 
 CREDENCE_ROOM = "credence"

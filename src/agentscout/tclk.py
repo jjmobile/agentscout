@@ -88,7 +88,7 @@ def secret_opens(statement: str, secret: str) -> bool:
 def make_offer(from_did: str, amount: str, expires_ms: int, claim_by_ms: int,
                refund_after_ms: int, job_id: Optional[str] = None,
                asset: str = "FLOP", rails: Optional[List[str]] = None,
-               nonce: Optional[str] = None) -> Dict:
+               nonce: Optional[str] = None, job_context: Optional[str] = None) -> Dict:
     """A payer-side hash-lock offer. `nonce` is random by default (the venue's duplicate
     filter 422s repeated texts; no two offers may serialize identically)."""
     fields: Dict = {
@@ -99,6 +99,8 @@ def make_offer(from_did: str, amount: str, expires_ms: int, claim_by_ms: int,
     }
     if job_id:
         fields["job"] = {"id": job_id, "proto": "a2a"}
+        if job_context:
+            fields["job"]["context"] = job_context
     frame = dict(fields)
     frame["id"] = offer_id(fields)
     return validate_frame(frame)

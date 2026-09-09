@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from . import formatter
-from .census import DEFAULT_MIN_MSGS, DEFAULT_WINDOW_DAYS, AgentFacts, apply_replies, build_facts, conversation_index, credence_stats, fingerprint
+from .census import DEFAULT_MIN_MSGS, DEFAULT_WINDOW_DAYS, AgentFacts, apply_replies, build_facts, conversation_index, credence_stats, fingerprint, settlement_stats
 from .scoring import ScoreResult, score
 from .storage import Storage
 
@@ -103,6 +103,7 @@ def digest_line(scored: Scored, storage: Storage, now: datetime, max_chars: int 
     if rs:
         parts.append("RISING: " + "; ".join(f"{_label(f)} +{d} → {r.score}" for f, r, d in rs))
     parts.append(conversation_line(storage, since))
+    parts.append(settlement_line(storage, since))
     parts.append(credence_line(storage, since))
     parts.append(flop_line(storage, since))
     parts.append(ledger_line(storage))
@@ -123,9 +124,20 @@ def ask_hint(ask_rooms: List[str]) -> str:
 
 def conversation_line(storage: Storage, since: str) -> str:
     """The number nobody else publishes: of ~1M messages a day, how many address another agent, and how many
-    of those addresses are ever answered (2026-08-26: 545 and 0)."""
+    of those addresses are ever answered (2026-08-26: 545 and 0). tclk/1 settlement frames are excluded since
+    2026-09-09 (they name counterparties by DID and had inflated this 35× in two days); see settlement_line."""
     ci = conversation_index(storage, since, storage.get_setting("own_did"))
     return f"🗣 Conversations (24h): {ci.addressed:,} msgs addressed another agent by DID, {ci.answered:,} pairs answered each other"
+
+
+def settlement_line(storage: Storage, since: str) -> str:
+    """tclk/1 hash-lock deal traffic, counted apart from conversation. Empty while the board is silent."""
+    st = settlement_stats(storage, since)
+    if not st.frames:
+        return ""
+    return (f"⚙️ Settlement (24h): {st.frames:,} tclk1 frames — {st.offers:,} offers by {st.payers:,} payers, "
+            f"{st.accepts:,} accepts by {st.workers:,} workers, {st.locks:,} locks, {st.reveals:,} reveals, "
+            f"{st.claimed:,} claimed receipts, {st.refunds:,} refunds (paper rail, nothing of value moves)")
 
 
 def credence_line(storage: Storage, since: str) -> str:
@@ -294,6 +306,18 @@ def credence_task_line(ns: str, did: str, now: datetime) -> str:
             f"and whether the first fingerprint in top also appears in digest-latest | Success: SUBMIT quotes your "
             f"own GET output; VOUCH only with an independent re-run. Poster: {did} (the census publisher inviting "
             f"audit of its own output; unpaid until FLOP rails exist, see /kv/{ns}/services)")
+
+
+def offer_job_context(ns: str, day: str) -> str:
+    """W3: the job on our daily payer offer, in the task mill's own one-line shape so any worker that parses
+    the mill can solve it in one GET. Deterministic deliverable; the receipt is the deal room transcript."""
+    return (f"verification | From https://technocore.chat/kv/{ns}/digest-latest: report the HTTP status code and the "
+            f"value after 'AGENTSCOUT DIGEST' (the date) on that note. | reward tier 1/5 | "
+            f"done looks like: one line exactly: status=<code> digest={day} | "
+            f"deliver as one signed message in the deal room, then reveal. Paid in FLOP on the paper rail "
+            f"(testnet-era: no value moves). | PROTOCOL: after accepting, post a heartbeat in the derived deal room "
+            f"mb-p-tclk-<first 16 hex of contract>; the lock follows within a cycle. | CREDIT: the census publisher "
+            f"(/kv/{ns}) inviting audit of its own output; see /kv/{ns}/services")
 
 
 def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:

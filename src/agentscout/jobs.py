@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
-SUPPORTED_FAMILIES = ("census", "inference", "verification", "attest")
+SUPPORTED_FAMILIES = ("census", "inference", "verification", "attest", "math")
 
 # The "attest" family has no material: the deliverable is a line we post in the deal room first.
 ATTEST_ANSWER = "__attest__"
@@ -168,6 +168,171 @@ def _census_assets(spec: Spec) -> str:
     return f"assets={len(totals)}; top_asset={top[0]}:{top[1]}"
 
 
+# ---- math (exact integer arithmetic; every template's answer is one line, digits only) ------------
+
+def _sigma(n: int) -> int:
+    total, m, p = 1, n, 2
+    while p * p <= m:
+        if m % p == 0:
+            e, q = 1, p
+            while m % p == 0:
+                m //= p
+                q *= p
+                e += 1
+            total *= (q - 1) // (p - 1)
+        p += 1 if p == 2 else 2
+    if m > 1:
+        total *= m + 1
+    return total
+
+
+def _collatz_steps(n: int) -> int:
+    steps = 0
+    while n != 1:
+        n = n // 2 if n % 2 == 0 else 3 * n + 1
+        steps += 1
+    return steps
+
+
+def _nim_move(heaps: List[int]) -> str:
+    x = 0
+    for h in heaps:
+        x ^= h
+    if x == 0:
+        return "none"
+    for i, h in enumerate(heaps):
+        if (h ^ x) < h:
+            return f"heap {i + 1} to {h ^ x}"
+    return "none"
+
+
+def _digit_sum_count(lo: int, hi: int, target: int) -> int:
+    return sum(1 for n in range(lo, hi + 1) if sum(int(c) for c in str(n)) == target)
+
+
+def _recurrence(a: int, b: int, k: int, mod: int, s1: int = 1, s2: int = 1) -> int:
+    if k == 1:
+        return s1 % mod
+    prev, cur = s1 % mod, s2 % mod
+    for _ in range(3, k + 1):
+        prev, cur = cur, (a * cur + b * prev) % mod
+    return cur
+
+
+def _is_prime(n: int) -> bool:
+    if n < 2:
+        return False
+    for p in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+        if n % p == 0:
+            return n == p
+    d, r = n - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        r += 1
+    for a in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):       # deterministic for n < 3.3e24
+        x = pow(a, d, n)
+        if x in (1, n - 1):
+            continue
+        for _ in range(r - 1):
+            x = x * x % n
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _next_prime(n: int) -> int:
+    c = n + 1
+    while not _is_prime(c):
+        c += 1
+    return c
+
+
+def _nqueens(n: int) -> int:
+    def go(row: int, cols: int, d1: int, d2: int) -> int:
+        if row == n:
+            return 1
+        free = ~(cols | d1 | d2) & ((1 << n) - 1)
+        total = 0
+        while free:
+            bit = free & -free
+            free ^= bit
+            total += go(row + 1, cols | bit, (d1 | bit) << 1, (d2 | bit) >> 1)
+        return total
+    return go(0, 0, 0, 0) if 0 < n <= 14 else -1
+
+
+def _lattice_paths(a: int, b: int) -> int:
+    from math import comb
+    return comb(a + b, a)
+
+
+def _shortest_path(edges: str, src: int, dst: int) -> Optional[int]:
+    import heapq
+    adj: Dict[int, List[Tuple[int, int]]] = {}
+    for a, b, w in re.findall(r"(\d+)-(\d+):(\d+)", edges):
+        adj.setdefault(int(a), []).append((int(b), int(w)))
+        adj.setdefault(int(b), []).append((int(a), int(w)))
+    dist = {src: 0}
+    heap = [(0, src)]
+    while heap:
+        d, u = heapq.heappop(heap)
+        if u == dst:
+            return d
+        if d > dist.get(u, float("inf")):
+            continue
+        for v, w in adj.get(u, []):
+            nd = d + w
+            if nd < dist.get(v, float("inf")):
+                dist[v] = nd
+                heapq.heappush(heap, (nd, v))
+    return None
+
+
+_MATH: List[Tuple[re.Pattern, Callable[["re.Match"], object]]] = [
+    (re.compile(r"Compute gcd\((\d+), (\d+)\) and lcm\(\1, \2\)\."),
+     lambda m: (lambda a, b: f"gcd={__import__('math').gcd(a, b)} lcm={a * b // __import__('math').gcd(a, b)}")(int(m.group(1)), int(m.group(2)))),
+    (re.compile(r"Nim with heaps of sizes ((?:\d+, )*\d+) \(normal play"),
+     lambda m: _nim_move([int(x) for x in m.group(1).split(", ")])),
+    (re.compile(r"How many integers n with (\d+) (?:≤|<=) n (?:≤|<=) (\d+) have digit sum exactly (\d+)\?"),
+     lambda m: _digit_sum_count(int(m.group(1)), int(m.group(2)), int(m.group(3)))),
+    (re.compile(r"How many steps does the Collatz map .* take from (\d+) to reach 1\?"),
+     lambda m: _collatz_steps(int(m.group(1)))),
+    (re.compile(r"Undirected weighted graph on nodes \d+\.\.\d+, edges \(a-b:w\): ([\d\-:, ]+)\. What is the length of the shortest path from node (\d+) to node (\d+)\?"),
+     lambda m: _shortest_path(m.group(1), int(m.group(2)), int(m.group(3)))),
+    (re.compile(r"Compute (?:σ|sigma)\((\d+)\), the sum of all positive divisors"),
+     lambda m: _sigma(int(m.group(1)))),
+    (re.compile(r"Sequence s\(1\)=(\d+), s\(2\)=(\d+), s\(k\)=(\d+)·s\(k−1\)\+(\d+)·s\(k−2\) mod (\d+)\. What is s\((\d+)\)\?"),
+     lambda m: _recurrence(int(m.group(3)), int(m.group(4)), int(m.group(6)), int(m.group(5)), int(m.group(1)), int(m.group(2)))),
+    (re.compile(r"Compute (\d+)\^(\d+) mod (\d+) \(\3 is prime\)"),
+     lambda m: pow(int(m.group(1)), int(m.group(2)), int(m.group(3)))),
+    (re.compile(r"Find the modular inverse of (\d+) modulo (\d+) \(\2 is prime\)"),
+     lambda m: pow(int(m.group(1)), -1, int(m.group(2)))),
+    (re.compile(r"How many distinct solutions does the (\d+)-queens problem have"),
+     lambda m: _nqueens(int(m.group(1)))),
+    (re.compile(r"Count the lattice paths from \((\d+),(\d+)\) to \((\d+),(\d+)\) using only unit steps right or up\."),
+     lambda m: _lattice_paths(int(m.group(3)) - int(m.group(1)), int(m.group(4)) - int(m.group(2)))),
+    (re.compile(r"What is the smallest prime strictly greater than (\d+)\?"),
+     lambda m: _next_prime(int(m.group(1)))),
+]
+
+
+def solve_math(question: str) -> Optional[str]:
+    for rx, fn in _MATH:
+        m = rx.search(question)
+        if not m:
+            continue
+        try:
+            v = fn(m)
+        except (ValueError, ZeroDivisionError, OverflowError, RecursionError):
+            return None
+        if v is None or (isinstance(v, int) and v < 0):
+            return None
+        return str(v)
+    return None
+
+
 # (family, question regex, needed columns, solver(spec, match) -> answer)
 _TEMPLATES: List[Tuple[str, re.Pattern, Tuple[str, ...], Callable[[Spec, "re.Match"], str]]] = [
     ("inference", re.compile(r"output the seq values of the (\d+) rows with the largest amount, highest first \(ties broken by lower seq first\), comma-separated"),
@@ -199,6 +364,8 @@ _TEMPLATES: List[Tuple[str, re.Pattern, Tuple[str, ...], Callable[[Spec, "re.Mat
 
 def solve(spec: Spec) -> Optional[str]:
     """One answer line, or None when the question is not one of the exact templates we compute."""
+    if spec.family == "math":
+        return solve_math(spec.question)
     for family, rx, cols, fn in _TEMPLATES:
         if spec.family != family:
             continue

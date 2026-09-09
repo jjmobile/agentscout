@@ -20,7 +20,7 @@ from .technocore import TechnocoreClient, TechnocoreError
 
 log = logging.getLogger("agentscout.commerce")
 
-AMOUNT = "1000000"                    # rail-native minimal units; rehearsal value on the paper rail
+AMOUNT = "200"                        # the task mill's going rate on the paper rail (W3, 2026-09-09); was 1000000
 OFFER_OPEN_HOURS = 6                  # expiresMs: offer dies unanswered after this
 CLAIM_BY_HOURS = 20                   # payee's safe claim window ends here
 REFUND_AFTER_HOURS = 22               # we may reclaim (and close the day's deal) from here
@@ -74,7 +74,8 @@ class Commerce:
             expires_ms=now_ms(now + timedelta(hours=OFFER_OPEN_HOURS)),
             claim_by_ms=now_ms(now + timedelta(hours=CLAIM_BY_HOURS)),
             refund_after_ms=now_ms(now + timedelta(hours=REFUND_AFTER_HOURS)),
-            job_id=task.split(" | ")[1])
+            job_id=task.split(" | ")[1],
+            job_context=render.offer_job_context(self.s.kv_ns, day))
         self.db.tclk_upsert(day, offer["id"], json.dumps(offer), "proposed", iso(now))
         self.pub._enqueue("tclk-offer", offer["id"], tclk.encode_frame(offer), now,
                           room=self.s.tclk_offers_room)

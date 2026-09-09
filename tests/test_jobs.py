@@ -65,7 +65,7 @@ def test_census_templates():
 def test_attest_and_unknown_questions():
     assert jobs.solve(jobs.parse_spec("attest | [difficulty 1/3] Post exactly one signed line in this deal's derived room from the did:key that accepted: `tclk-attest <full contract id>`." + TAIL)) == jobs.ATTEST_ANSWER
     assert jobs.solve(jobs.parse_spec(inf("summarise the table in one witty sentence."))) is None
-    assert jobs.solve(jobs.parse_spec("math | [difficulty 1/3] Compute gcd(12, 18) and lcm(12, 18)." + TAIL)) is None
+    assert jobs.solve(jobs.parse_spec("math | [difficulty 1/3] Prove the Collatz conjecture in one line." + TAIL)) is None
     assert jobs.parse_spec("just some text") is None
     # a template whose material lacks the needed columns is refused, not guessed
     spec = jobs.parse_spec(inf("output the seq values that are even numbers, in ascending order, comma-separated (or 'none').").replace(INF_ROWS, "a | b 1 | 2"))
@@ -100,3 +100,24 @@ def test_census_ties_are_broken_case_insensitively_but_inference_ties_by_ascii()
     rows = INF_ROWS.replace("wDPz2djS | 1000000", "wDPz2djS | 200").replace("iZDZE2Xz | 400", "iZDZE2Xz | 200").replace("629214 | AiCsjsQ8 | 400", "629214 | Zed | 400")
     spec = jobs.parse_spec(inf('sum the amount per payer and output the payer with the largest total and that total, as "<payer> <total>" (ties: ASCII-smaller payer).').replace(INF_ROWS, rows))
     assert jobs.solve(spec) == "Zed 400"
+
+
+def test_math_templates():
+    m = lambda q: jobs.solve(jobs.parse_spec(f"math | [difficulty 1/3] {q}" + TAIL))
+    assert m("Compute gcd(12, 18) and lcm(12, 18).") == "gcd=6 lcm=36"
+    assert m('Nim with heaps of sizes 8, 17, 26, 25 (normal play, remove any number from one heap, last move wins). If the player to move can force a win, give one winning move as "heap i to k" (1-based heap index, new size); otherwise answer "none".') == "heap 2 to 11"
+    assert m('Nim with heaps of sizes 3, 5, 6 (normal play, remove any number from one heap, last move wins). If the player to move can force a win, give one winning move as "heap i to k" (1-based heap index, new size); otherwise answer "none".') == "none"
+    assert m("How many integers n with 10 ≤ n ≤ 30 have digit sum exactly 5?") == "3"
+    assert m("How many integers n with 10 <= n <= 30 have digit sum exactly 5?") == "3"
+    assert m("How many steps does the Collatz map (n→n/2 if even, n→3n+1 if odd) take from 6 to reach 1?") == "8"
+    assert m("Undirected weighted graph on nodes 0..3, edges (a-b:w): 0-1:7, 1-2:2, 0-2:20, 2-3:1. What is the length of the shortest path from node 0 to node 3?") == "10"
+    assert m("Compute σ(12), the sum of all positive divisors of 12 (including 1 and 12).") == "28"
+    assert m("Compute sigma(60643), the sum of all positive divisors of 60643 (including 1 and 60643).") == str(sum(d for d in range(1, 60644) if 60643 % d == 0))
+    assert m("Sequence s(1)=1, s(2)=1, s(k)=1·s(k−1)+1·s(k−2) mod 1000000007. What is s(10)?") == "55"
+    assert m("Compute 4^13 mod 497 (497 is prime). Show the method in one clause (e.g. square-and-multiply).") == str(pow(4, 13, 497))
+    assert m("Find the modular inverse of 3 modulo 11 (11 is prime), i.e. the x in [1, 10] with 3·x ≡ 1 (mod 11).") == "4"
+    assert m("How many distinct solutions does the 8-queens problem have (all placements of 8 non-attacking queens on an 8×8 board, counting reflections and rotations as distinct)?") == "92"
+    assert m("Count the lattice paths from (0,0) to (12,5) using only unit steps right or up.") == "6188"
+    assert m("What is the smallest prime strictly greater than 69006655237?") == "69006655259"
+    assert m("What is the smallest prime strictly greater than 10?") == "11"
+    assert m("Solve the Riemann hypothesis in one line.") is None

@@ -362,3 +362,24 @@ def test_note_name_and_sample_come_from_streamed_lookups(storage):
     assert facts[DID_A].name == "zcode" and facts[DID_A].note_present
     assert facts[DID_A].sample == "latest message of A"
     assert facts[DID_B].name is None and not facts[DID_B].note_present and facts[DID_B].sample == "B has no note"
+
+
+def test_settlement_frames_are_counted_apart_from_conversation(storage):
+    from agentscout.census import conversation_index, settlement_stats
+    from agentscout import render
+    A, B = DID_A, DID_B
+    _put(storage, "tclk-offers", 1, -100, A, 'tclk1 {"amount":"200","asset":"FLOP","from":"' + A + '","id":"0xab","type":"offer"}')
+    _put(storage, "tclk-offers", 2, -90, B, 'tclk1 {"contract":"0xcd","from":"' + B + '","ref":"0xab","statement":"0x11","type":"accept"}')
+    _put(storage, "deal", 3, -80, A, 'tclk1 {"contract":"0xcd","from":"' + A + '","rail":"paper","ref":"0xcd","type":"lock"}')
+    _put(storage, "deal", 4, -70, B, 'tclk1 {"contract":"0xcd","from":"' + B + '","secret":"0x22","type":"reveal"}')
+    _put(storage, "deal", 5, -60, A, 'tclk1 {"contract":"0xcd","from":"' + A + '","outcome":"claimed","type":"receipt"}')
+    _put(storage, "general", 6, -50, A, f"hey {B} are you there?")
+    _put(storage, "general", 7, -40, B, f"{A} yes, here")
+    since = T(-200)
+    ci = conversation_index(storage, since)
+    assert ci.addressed == 2 and ci.answered == 1                 # the deal frames never count as conversation
+    st = settlement_stats(storage, since)
+    assert (st.frames, st.offers, st.accepts, st.locks, st.reveals, st.claimed, st.refunds, st.payers, st.workers) == (5, 1, 1, 1, 1, 1, 0, 1, 1)
+    line = render.settlement_line(storage, since)
+    assert line.startswith("⚙️ Settlement (24h): 5 tclk1 frames — 1 offers by 1 payers, 1 accepts by 1 workers")
+    assert render.settlement_line(storage, T(-10)) == ""
