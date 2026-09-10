@@ -65,3 +65,18 @@ def test_note_signature_payload_and_claim_url(tmp_path, server):
     q = ident.did.replace(":", "%3A")
     server.route(f"/kv/room-owners/d-x/set-signed/{q}/{sig}/42/{q}", body="ok")
     assert c.claim_room_signed("d-x", ident.did, sig, 42) == (200, "ok")
+
+
+def test_ss58_address_matches_substrate_vector_and_our_did(tmp_path):
+    from agentscout.identity import ss58_address, did_from_public_key, b58decode
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    # Substrate's well-known Alice key under the generic prefix 42 (the SS58 spec's own vector).
+    alice = bytes.fromhex("d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d")
+    did = did_from_public_key(Ed25519PublicKey.from_public_bytes(alice))
+    assert ss58_address(did) == "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
+    # Any other prefix changes the address; the body still carries our raw public key.
+    other = ss58_address(did, prefix=7)
+    assert other != ss58_address(did) and b58decode(other)[1:33] == alice
+    import pytest
+    with pytest.raises(ValueError):
+        ss58_address(did, prefix=64)

@@ -66,7 +66,11 @@ class Ingestor:
     # faucet/airdrop terms + P6 inference-marketplace terms: the day spendable inference is
     # advertised we want the WARN immediately, so the inference seam can be switched on (inference.py).
     DOC_KEYWORDS = ("faucet", "testnet", "airdrop", "flop", "wallet", "reward", "claim",
-                    "inference", "compute", "gpu", "miner", "settle", "x402")
+                    "inference", "compute", "gpu", "miner", "settle", "x402",
+                    # Yellow Paper v0.5.0 (2026-09-10): inference settles only through pallet_compute_channel
+                    # sessions (open_channel/settle), agents need a registered identity + stake and an SS58
+                    # account; an RPC endpoint or channel/stake wording in the docs is the W5 trigger.
+                    "channel", "rpc", "ss58", "stake")
 
     def watch_docs(self, now: datetime) -> bool:
         """Every docs_watch_hours re-read llms.txt + agent.json; a change is a WARNING (it reaches Telegram) that

@@ -63,6 +63,20 @@ def fingerprint(did: str) -> str:
     return hashlib.sha256(did.encode("utf-8")).hexdigest()[:16]
 
 
+def ss58_address(did: str, prefix: int = 42) -> str:
+    """The FLOP/Substrate account this DID's key already is. Yellow Paper v0.5.0 §6.5: an account is the 32-byte
+    public key (`AccountId`), ed25519 is an accepted signer, SS58 is only the display encoding under the chain's
+    prefix — so no second key is needed to hold or spend FLOP. Prefix 42 is the generic Substrate value; the FLOP
+    devnet/mainnet prefixes are not published yet (§9.3 R9.8), pass them when they are. Checksum per the SS58 spec:
+    blake2b-512("SS58PRE" ‖ prefix ‖ pubkey)[:2]."""
+    if not 0 <= prefix < 64:
+        raise ValueError("only single-byte SS58 prefixes are supported")
+    pub = public_key_from_did(did).public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    body = bytes([prefix]) + pub
+    checksum = hashlib.blake2b(b"SS58PRE" + body, digest_size=64).digest()[:2]
+    return b58encode(body + checksum)
+
+
 class Identity:
     def __init__(self, private_key: Ed25519PrivateKey):
         self._key = private_key

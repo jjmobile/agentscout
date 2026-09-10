@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import formatter
 
-KEYWORDS = ("faucet", "testnet", "airdrop", "flop", "wallet", "reward", "claim")
+KEYWORDS = ("faucet", "testnet", "airdrop", "flop", "wallet", "reward", "claim", "channel", "rpc", "ss58", "stake")
 _SECTION_RE = re.compile(r"^(#{1,3}\s+\S.*|[A-Z][A-Z0-9 /_&-]{2,40}:)\s*$")   # "## IDENTITY" or "LIMITS:" style headings
 MAX_ITEMS = 12          # per list in the feed line; the note carries the full detail
 VALUE_CHARS = 60
