@@ -122,6 +122,18 @@ MIGRATIONS: List[str] = [
     CREATE INDEX worker_deals_state ON worker_deals(state);
     CREATE INDEX worker_deals_day ON worker_deals(day);
     """,
+    # 9: pairings — several payer-side deals per day, keyed by offer id, with the chosen payee and the
+    #    board seq of our offer (the accepts must be read live right after it: a since-read returns the
+    #    newest page, never the oldest-after). tclk_deals stays as the pre-2026-09-13 archive.
+    """
+    CREATE TABLE payer_deals (
+        offer_id TEXT PRIMARY KEY, day TEXT NOT NULL, offer_json TEXT NOT NULL, contract TEXT,
+        accept_json TEXT, state TEXT NOT NULL, payee TEXT, posted_seq INTEGER, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX payer_deals_day ON payer_deals(day);
+    INSERT INTO payer_deals(offer_id, day, offer_json, contract, accept_json, state, updated_at)
+        SELECT offer_id, day, offer_json, contract, accept_json, state, updated_at FROM tclk_deals;
+    """,
 ]
 
 
@@ -527,23 +539,32 @@ class Storage:
             (since,))
 
     # ---- tclk deals (P10.2) --------------------------------------------------------------
-    def tclk_deal(self, day: str) -> Optional[sqlite3.Row]:
-        return self.conn.execute("SELECT * FROM tclk_deals WHERE day=?", (day,)).fetchone()
+    def tclk_deals_for_day(self, day: str) -> List[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM payer_deals WHERE day=? ORDER BY updated_at", (day,)).fetchall()
 
     def tclk_active_deal(self) -> Optional[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT * FROM tclk_deals WHERE state NOT IN ('claimed','refunded','cancelled','expired') "
-            "ORDER BY day DESC LIMIT 1").fetchone()
+            "SELECT * FROM payer_deals WHERE state NOT IN ('claimed','refunded','cancelled','expired') "
+            "ORDER BY updated_at DESC LIMIT 1").fetchone()
 
     def tclk_upsert(self, day: str, offer_id: str, offer_json: str, state: str, now: str,
-                    contract: Optional[str] = None, accept_json: Optional[str] = None) -> None:
+                    contract: Optional[str] = None, accept_json: Optional[str] = None,
+                    payee: Optional[str] = None, posted_seq: Optional[int] = None) -> None:
         self.conn.execute(
-            "INSERT INTO tclk_deals(day,offer_id,offer_json,contract,accept_json,state,updated_at) "
-            "VALUES(?,?,?,?,?,?,?) ON CONFLICT(day) DO UPDATE SET "
+            "INSERT INTO payer_deals(offer_id,day,offer_json,contract,accept_json,state,payee,posted_seq,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(offer_id) DO UPDATE SET "
             "contract=COALESCE(excluded.contract, contract), "
             "accept_json=COALESCE(excluded.accept_json, accept_json), "
+            "payee=COALESCE(excluded.payee, payee), posted_seq=COALESCE(excluded.posted_seq, posted_seq), "
             "state=excluded.state, updated_at=excluded.updated_at",
-            (day, offer_id, offer_json, contract, accept_json, state, now))
+            (offer_id, day, offer_json, contract, accept_json, state, payee, posted_seq, now))
+
+    def iter_settlement_frames(self, room: str, since: str) -> Iterable[sqlite3.Row]:
+        """(sender_did, text) of the board's lock / reveal / claimed-receipt frames since `since`, for partners.rank."""
+        return self.conn.execute(
+            "SELECT sender_did, text FROM messages WHERE room=? AND ts>? AND signed=1 AND sender_did IS NOT NULL "
+            "AND text LIKE 'tclk1 {%' AND (text LIKE '%\"type\":\"lock\"%' OR text LIKE '%\"type\":\"reveal\"%' "
+            "OR text LIKE '%\"outcome\":\"claimed\"%')", (room, since))
 
     # ---- worker deals (W1) ----------------------------------------------------------------
     def worker_insert(self, contract: str, day: str, offer_id: str, payer: str, offer_json: str,
@@ -599,16 +620,20 @@ class Storage:
                 counterparties.add(r["payer"])
         spent: Dict[str, int] = {}
         payer_states: Dict[str, int] = {}
-        for r in self.conn.execute("SELECT offer_json, state FROM tclk_deals"):
+        payees = set()
+        for r in self.conn.execute("SELECT offer_json, state, payee FROM payer_deals"):
             payer_states[r["state"]] = payer_states.get(r["state"], 0) + 1
             if r["state"] == "claimed":
+                if r["payee"]:
+                    payees.add(r["payee"])
                 try:
                     o = json.loads(r["offer_json"])
                     spent[o["asset"]] = spent.get(o["asset"], 0) + int(o["amount"])
                 except (ValueError, KeyError, TypeError):
                     pass
         return {"earned": earned, "spent": spent, "payee_states": payee_states, "payer_states": payer_states,
-                "grades": grades, "counterparties": len(counterparties), "since": first}
+                "grades": grades, "counterparties": len(counterparties), "payer_counterparties": len(payees),
+                "since": first}
 
     def iter_room_after_seq(self, room: str, after_seq: int, limit: int = 2000) -> List[sqlite3.Row]:
         """Signed messages of one room with seq > after_seq, oldest first (bounded)."""

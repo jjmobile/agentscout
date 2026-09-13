@@ -139,7 +139,7 @@ def test_commerce_opens_one_offer_per_day_and_folds_a_valid_accept(server, setti
     outbox = storage.outbox_has(s.tclk_offers_room, offer["id"])
     assert outbox is not None and tclk.decode_frame(outbox["text"])["id"] == offer["id"]
     com.tick(at + timedelta(minutes=5))                    # same day: still one deal
-    assert storage.conn.execute("SELECT COUNT(*) FROM tclk_deals").fetchone()[0] == 1
+    assert storage.conn.execute("SELECT COUNT(*) FROM payer_deals").fetchone()[0] == 1
     # a valid accept lands in the (ingested) offers room
     preimage, statement = tclk.generate_hash_lock()
     core = {"from": DID_A, "ref": offer["id"], "statement": statement, "nonce": "0011223344556677"}
@@ -182,3 +182,59 @@ def test_commerce_rejects_forged_sender(server, settings, client, storage, tmp_p
                             [(1, T(1), other, other, True, tclk.encode_frame(accept), "h1")], T(1))
     com.tick(at + timedelta(minutes=10))
     assert storage.tclk_active_deal()["state"] == "proposed"
+
+
+def _accept_for(offer, did, nonce):
+    _preimage, statement = tclk.generate_hash_lock()
+    core = {"from": did, "ref": offer["id"], "statement": statement, "nonce": nonce}
+    return dict({"type": "accept"}, **core, contract=tclk.contract_id(offer, core))
+
+
+def test_commerce_reads_accepts_live_and_locks_with_a_partner_over_the_first_acceptor(server, settings, client, storage, tmp_path, monkeypatch):
+    """Pairings (2026-09-13): the accepts arrive seconds after the offer and a since-read only returns the newest
+    page, so the offer is posted and its accepts collected in the same tick; a partner's accept beats an earlier one."""
+    from agentscout import commerce as commerce_mod
+    from conftest import room_json, msg
+    monkeypatch.setattr(commerce_mod, "ACCEPT_SETTLE_SECONDS", 0)
+    s, ident, com = make_commerce(server, client, storage, tmp_path)
+    com._sleep = lambda _s: None
+    other = "did:key:z6Mks5fqt4qcsbLEMU15bbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    com._partners, com._partners_day = {other}, NOW.strftime("%Y-%m-%d")
+    server.route("/r/tclk-offers", 200, {"last_seq": 500})                     # our offer lands at seq 500
+    at = NOW.replace(hour=7)
+    captured = {}
+    real_read = client.read_room
+
+    def read_room(room, since=None, limit=200, wait=None):
+        offer = json.loads(storage.tclk_active_deal()["offer_json"])
+        a1, a2 = _accept_for(offer, DID_A, "0011223344556677"), _accept_for(offer, other, "8899aabbccddeeff")
+        captured.setdefault("calls", []).append((room, since, wait))
+        return room_json(room, [msg(501, T(0), DID_A, tclk.encode_frame(a1)),
+                                msg(503, T(0), other, tclk.encode_frame(a2))])
+    client.read_room = read_room
+    com.tick(at)
+    row = storage.tclk_active_deal()
+    assert row["state"] == "accepted" and row["payee"] == other and row["posted_seq"] == 500
+    assert json.loads(row["accept_json"])["from"] == other
+    assert captured["calls"][0] == (s.tclk_offers_room, 500, 5)
+    client.read_room = real_read
+
+
+def test_commerce_opens_several_offers_a_day_with_spacing(server, settings, client, storage, tmp_path):
+    s, ident, com = make_commerce(server, client, storage, tmp_path)
+    s.tclk_offers_per_day = 2
+    com._partners, com._partners_day = set(), NOW.strftime("%Y-%m-%d")
+    at = NOW.replace(hour=7)
+    com.tick(at)
+    first = storage.tclk_active_deal()
+    assert first is not None and storage.conn.execute("SELECT COUNT(*) FROM payer_deals").fetchone()[0] == 1
+    stamp = lambda m: (at + timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    storage.tclk_upsert(first["day"], first["offer_id"], first["offer_json"], "refunded", stamp(60))
+    com.tick(at + timedelta(minutes=70))                                           # 10 min after close: too soon
+    assert storage.conn.execute("SELECT COUNT(*) FROM payer_deals").fetchone()[0] == 1
+    com.tick(at + timedelta(minutes=90))                                           # spacing elapsed: second offer
+    assert storage.conn.execute("SELECT COUNT(*) FROM payer_deals").fetchone()[0] == 2
+    second = storage.tclk_active_deal()
+    storage.tclk_upsert(second["day"], second["offer_id"], second["offer_json"], "expired", stamp(120))
+    com.tick(at + timedelta(minutes=200))                                          # cap of 2 for the day
+    assert storage.conn.execute("SELECT COUNT(*) FROM payer_deals").fetchone()[0] == 2

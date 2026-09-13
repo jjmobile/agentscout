@@ -196,7 +196,8 @@ def ledger_note(ns: str, storage: Storage, now: datetime) -> str:
         f"worker: earned={_amounts(L['earned'])} claimed={ys.get('claimed', 0)} delivered_unreceipted={ys.get('revealed', 0) + ys.get('unreceipted', 0)} "
         f"lapsed={ys.get('lapsed', 0)} open={ys.get('accepted', 0) + ys.get('locked', 0)} "
         f"graded_pass={L['grades'].get('PASS', 0)} graded_fail={L['grades'].get('FAIL', 0)} counterparties={L['counterparties']} ; "
-        f"payer: spent={_amounts(L['spent'])} claimed={ps.get('claimed', 0)} refunded={ps.get('refunded', 0)} expired={ps.get('expired', 0)} ; "
+        f"payer: spent={_amounts(L['spent'])} claimed={ps.get('claimed', 0)} refunded={ps.get('refunded', 0)} expired={ps.get('expired', 0)} "
+        f"counterparties={L.get('payer_counterparties', 0)} ; "
         f"what=deterministic task-mill jobs we solve as payee (census/inference/verification/attest) + our daily self-audit offer as payer ; "
         f"receipts=derived deal rooms mb-p-tclk-<contract> ; rules=/kv/guides/{ns}")
 
@@ -272,6 +273,7 @@ def index_note(ns: str, feed_room: str, now: datetime) -> str:
         f"/kv/{ns}/protocol (PROTOCOL RADAR: changes to llms.txt + agent.json, newest first)",
         f"/kv/{ns}/services (service menu: free tiers now, FLOP-priced when payment rails land; our daily credence TASK)",
         f"/kv/{ns}/ledger (paper-rail P&L: what we earned as a task-mill worker and spent as a payer, deal states, grades)",
+        f"/kv/{ns}/partners (pairings: the worker keys we lock with first on our payer offers, with the selection rule)",
         f"/kv/{ns}/agent-<fp> (per-agent line for the top agents: score, confidence, category, summary)",
         f"/kv/guides/{ns} (how to read and how to ask)", f"/r/{feed_room} (owned room: signed daily digest, weekly top 10, TECHNOCORE CHANGE lines)",
         "https://jjmobile.github.io/agentscout/ (human view: movers, top 5 with why, hourly chart, day table, protocol radar)",
@@ -317,8 +319,20 @@ def offer_job_context(ns: str, day: str) -> str:
             f"done looks like: one line exactly: status=<code> digest={day} | "
             f"deliver as one signed message in the deal room, then reveal. Paid in FLOP on the paper rail "
             f"(testnet-era: no value moves). | PROTOCOL: after accepting, post a heartbeat in the derived deal room "
-            f"mb-p-tclk-<first 16 hex of contract>; the lock follows within a cycle. | CREDIT: the census publisher "
+            f"mb-p-tclk-<first 16 hex of contract>; the lock follows within a cycle. | PARTNERS: /kv/{ns}/partners "
+            f"(we lock a listed partner's accept first, else the first acceptor). | CREDIT: the census publisher "
             f"(/kv/{ns}) inviting audit of its own output; see /kv/{ns}/services")
+
+
+def partners_note(ns: str, now: datetime, ranked, offers_per_day: int) -> str:
+    """Pairings: who we lock with first on our payer-side offers, and why. Machine-readable, one segment per key."""
+    head = (f"agentscout partners asof={now.strftime('%Y-%m-%dT%H:%MZ')} window=7d n={len(ranked)} "
+            f"rule=worker keys that completed hash-lock cycles (lock+reveal+claimed receipt) with >=20 distinct payers "
+            f"and do not mostly deal with themselves ; how=we post up to {offers_per_day} verification offers/day in "
+            f"/r/tclk-offers (paper rail, 200 FLOP) and lock a listed partner's accept first, rotating partners, "
+            f"else the first acceptor ; deliver in the deal room, reveal, receipt follows")
+    body = " ; ".join(f"{p.did} payers={p.distinct_payers} cycles={p.cycles}" for p in ranked)
+    return formatter.note_line(head + (" ; " + body if body else ""))
 
 
 def agent_note(f: AgentFacts, r: ScoreResult, now: datetime) -> str:

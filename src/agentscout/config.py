@@ -131,6 +131,7 @@ class Settings:
     credence_room: str = "credence"
     tclk_enabled: bool = False              # P10.2: one tclk/1 paper deal per day (payer, hash lock)
     tclk_offers_room: str = "tclk-offers"
+    tclk_offers_per_day: int = 1            # pairings (2026-09-13): payer-side deals per UTC day, one in flight at a time
     worker_enabled: bool = False            # W1: accept other agents' tclk/1 offers we can fulfil deterministically
     worker_max_per_day: int = 10            # accepted deals per UTC day
     worker_max_open: int = 3                # deals in flight at once
@@ -207,6 +208,7 @@ class Settings:
             credence_room=_room("SCOUT_CREDENCE_ROOM", "credence"),
             tclk_enabled=_bool("SCOUT_TCLK_ENABLED", False),
             tclk_offers_room=_room("SCOUT_TCLK_OFFERS_ROOM", "tclk-offers"),
+            tclk_offers_per_day=_int("SCOUT_TCLK_OFFERS_PER_DAY", 1, 1, 24),
             worker_enabled=_bool("SCOUT_WORKER_ENABLED", False),
             worker_max_per_day=_int("SCOUT_WORKER_MAX_PER_DAY", 10, 0, 500),
             worker_max_open=_int("SCOUT_WORKER_MAX_OPEN", 3, 1, 20),
