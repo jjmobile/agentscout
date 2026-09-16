@@ -95,7 +95,8 @@ class OpsCounter:
 
 class TelegramLogHandler(logging.Handler):
     """Forwards only actionable records: ERROR+ from anywhere, WARNING from the publisher (ownership, tamper,
-    post failures), and ingest warnings about protocol drift. Transient 5xx/429/gaps are counted, not sent."""
+    post failures), and ingest warnings about protocol drift (version, docs, Yellow Paper). Transient 5xx/429/gaps
+    are counted, not sent."""
 
     def __init__(self, notifier: TelegramNotifier, counter: Optional[OpsCounter] = None, level: int = logging.WARNING):
         super().__init__(level)
@@ -113,7 +114,8 @@ class TelegramLogHandler(logging.Handler):
         if record.name.startswith("agentscout.publisher"):
             return True
         msg = record.getMessage()
-        return "VERSION CHANGED" in msg or "NOTE_TAMPERED" in msg
+        return ("VERSION CHANGED" in msg or "NOTE_TAMPERED" in msg
+                or "DOCS CHANGED" in msg or "YELLOW PAPER CHANGED" in msg)   # both Protocol Radar sources
 
     def emit(self, record: logging.LogRecord) -> None:
         try:

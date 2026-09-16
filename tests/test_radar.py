@@ -52,3 +52,49 @@ def test_watch_docs_records_a_change_only_when_a_previous_copy_exists(server, se
     assert rows[0]["summary"].startswith("agent.json v0.7.0 → v0.9.7; 3 agent.json fields changed")
     assert storage.unpublished_protocol_changes()[0]["id"] == rows[0]["id"]
     assert ing.watch_docs(NOW + timedelta(hours=14)) is False and len(storage.protocol_changes()) == 1
+
+
+YP_OLD = ('<span>Version<b>0.5.0 (draft)</b></span>\n<span>Updated<b>2026-09-05</b></span>\n\n'
+          '**E.36 — External-work attestor classes `[TBD]`.** Market-grade attestor sets.\n\n'
+          '**E.38 — Genesis allocation & airdrop vesting `[TBD]`.** The path that distributes\ngenesis_supply has no normative section.\n\n'
+          '**E.39 — Validator-reward liquidity `[RATIFY]`.** Unrelated.\n\n'
+          '**E.40 — Agent & staker leg distribution `[TBD]`.** Specify how the pools are paid out.\n')
+YP_NEW = (YP_OLD.replace("0.5.0 (draft)", "0.6.0 (draft)").replace("2026-09-05", "2026-10-02")
+          .replace("airdrop vesting `[TBD]`.** The path that distributes\ngenesis_supply has no normative section.",
+                   "airdrop vesting `[RATIFY]`.** Tier set: settled inference spend on testnet, sublinear; claim path §9.4."))
+
+
+def test_yellowpaper_facts_and_summary_track_the_open_items():
+    old, new = radar.yellowpaper_facts(YP_OLD), radar.yellowpaper_facts(YP_NEW)
+    assert old["version"] == "0.5.0 (draft)" and old["updated"] == "2026-09-05"
+    assert {t: i["status"] for t, i in old["items"].items()} == {"E.36": "TBD", "E.38": "TBD", "E.40": "TBD"}
+    assert radar.yellowpaper_summary(old, old) == "text changed outside version/date/E.36,E.38,E.40"
+    assert radar.yellowpaper_summary(old, new) == "version 0.5.0 (draft) → 0.6.0 (draft); updated 2026-09-05 → 2026-10-02; E.38 [TBD] → [RATIFY]"
+    reworded = YP_OLD.replace("Specify how the pools", "Specify how both pools")
+    assert radar.yellowpaper_summary(old, radar.yellowpaper_facts(reworded)) == "E.40 text changed (still [TBD])"
+    gone = YP_OLD.replace("**E.40 — Agent & staker leg distribution `[TBD]`.**", "**E.40 — Agent leg.**")
+    assert radar.yellowpaper_summary(old, radar.yellowpaper_facts(gone)) == "E.40 GONE (was [TBD]; ratified into a section?)"
+
+
+def test_watch_yellowpaper_warns_once_per_change_and_never_publishes(server, settings, client, storage, caplog):
+    import logging
+    from agentscout.ingest import Ingestor
+    path = "/flop-labs/yellowpaper/main/yellowpaper.md"
+    server.route(path, body=YP_OLD)
+    ing = Ingestor(settings, client, storage)
+    with caplog.at_level(logging.INFO):
+        assert ing.watch_yellowpaper(NOW) is False                                # baseline
+        assert ing.watch_yellowpaper(NOW + timedelta(hours=1)) is False           # not due
+        assert server.requests.count(path) == 1
+        assert storage.doc_snapshot("yellowpaper.md")["text"] == YP_OLD
+        server.route(path, body=YP_NEW)
+        assert ing.watch_yellowpaper(NOW + timedelta(hours=7)) is True
+        assert ing.watch_yellowpaper(NOW + timedelta(hours=14)) is False          # unchanged: quiet
+        server.route(path, status=503, body="")
+        assert ing.watch_yellowpaper(NOW + timedelta(hours=21)) is False          # outage: no snapshot churn
+    assert storage.doc_snapshot("yellowpaper.md")["text"] == YP_NEW
+    warn = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING and "YELLOW PAPER CHANGED" in r.getMessage()]
+    assert len(warn) == 1 and "E.38 [TBD] → [RATIFY] | now E.36=[TBD] E.38=[RATIFY] E.40=[TBD]" in warn[0]
+    assert storage.protocol_changes() == [] and storage.unpublished_protocol_changes() == []
+    settings.yellowpaper_url = ""
+    assert ing.watch_yellowpaper(NOW + timedelta(days=2)) is False and server.requests.count(path) == 4

@@ -122,6 +122,40 @@ class Ingestor:
                     change.summary(), change.detail()[:600] or "-", ",".join(new) or "-")
         return True
 
+    def watch_yellowpaper(self, now: datetime) -> bool:
+        """Same cadence as watch_docs, other source: the FLOP Yellow Paper mirror. E.38 (airdrop tier set, claim
+        path, vesting, testnet→mainnet conversion) and E.40 (agent leg) are [TBD]; the day they move is the day
+        the agent-airdrop rules exist. A change is a WARNING that reaches Telegram; nothing is published."""
+        url = self.s.yellowpaper_url
+        if not url or self.s.docs_watch_hours <= 0:
+            return False
+        last = self.db.get_setting("yellowpaper_checked_at")
+        if last and last >= iso(now - timedelta(hours=self.s.docs_watch_hours)):
+            return False
+        try:
+            status, text = self.c.get_url(url)
+            if status != 200:
+                raise TechnocoreError(f"GET {url}: HTTP {status}")
+        except TechnocoreError as exc:
+            log.warning("yellow paper watch: %s", exc)
+            return False
+        self.db.set_setting("yellowpaper_checked_at", iso(now))
+        prev = self.db.doc_snapshot("yellowpaper.md")
+        if prev is not None and prev["text"] == text:
+            return False
+        self.db.set_doc_snapshot("yellowpaper.md", text, iso(now))
+        facts = radar.yellowpaper_facts(text)
+        status_line = " ".join(f"{t}=[{i['status']}]" for t, i in sorted(facts["items"].items())) or "tracked items not found"
+        if prev is None:
+            log.info("yellow paper watch: baseline version %s updated %s (%d chars): %s",
+                     facts["version"] or "?", facts["updated"] or "?", len(text), status_line)
+            return False
+        summary = radar.yellowpaper_summary(radar.yellowpaper_facts(prev["text"]), facts)
+        log.warning("FLOP YELLOW PAPER CHANGED: %s | now %s — read https://github.com/flop-labs/yellowpaper "
+                    "(E.38 = airdrop claim path/vesting/conversion, E.40 = agent leg, E.36 = attestor classes)",
+                    summary, status_line)
+        return True
+
     # ---- rooms ------------------------------------------------------------------------
     def ensure_config_rooms(self, now: datetime) -> None:
         for room in self.s.watch_rooms:

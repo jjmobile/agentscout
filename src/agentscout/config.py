@@ -10,6 +10,9 @@ class ConfigError(ValueError):
     pass
 
 
+YELLOWPAPER_URL = "https://raw.githubusercontent.com/flop-labs/yellowpaper/main/yellowpaper.md"
+
+
 def _bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -139,6 +142,7 @@ class Settings:
                                             # "flagged") for top agents at /kv/<ns>/attest-<fp>. Outward-facing
                                             # (labels third parties publicly) → opt-in, off by default.
     docs_watch_hours: int = 6               # re-read llms.txt + agent.json this often; 0 disables
+    yellowpaper_url: str = YELLOWPAPER_URL  # FLOP Yellow Paper mirror, same cadence; empty disables
     # Telegram reporting (outbound only)
     telegram_token_file: str = "/run/secrets/telegram_bot_token"
     telegram_chat_id: str = ""
@@ -214,6 +218,7 @@ class Settings:
             worker_max_open=_int("SCOUT_WORKER_MAX_OPEN", 3, 1, 20),
             attest_enabled=_bool("SCOUT_ATTEST_ENABLED", False),
             docs_watch_hours=_int("SCOUT_DOCS_WATCH_HOURS", 6, 0, 24 * 7),
+            yellowpaper_url=os.environ.get("SCOUT_YELLOWPAPER_URL", YELLOWPAPER_URL).strip(),
             telegram_token_file=os.environ.get("TELEGRAM_BOT_TOKEN_FILE", "/run/secrets/telegram_bot_token"),
             telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
             telegram_max_per_hour=_int("TELEGRAM_MAX_PER_HOUR", 20, 1, 500),

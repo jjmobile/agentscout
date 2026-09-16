@@ -6,6 +6,7 @@ feed room, (b) a kv note with the recent history, (c) a WARNING that reaches the
 derived from the two texts and nothing else."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -159,3 +160,50 @@ def protocol_note(history: List[DocChange], current_version: Optional[str], base
             f"watching=llms.txt,/.well-known/agent.json baseline={baseline_at or '?'} changes={len(history)}")
     items = [f"{c.ts} {c.summary()} :: {c.detail()}" for c in history]
     return formatter.note_line(head + (" ; " if items else "") + " ; ".join(items))
+
+
+# ---- FLOP Yellow Paper (github.com/flop-labs/yellowpaper) ----------------------------------------
+# Second radar source. The paper is the only normative text on what an agent must do to earn FLOP; the open
+# items below decide whether an agent like us earns anything: E.36 external-work attestor classes (our lane),
+# E.38 genesis allocation & airdrop vesting (tier set, claim path, testnet→mainnet conversion), E.40 agent leg
+# distribution. The day one of them stops being [TBD] is the day the airdrop rules exist.
+YP_ITEMS = ("E.36", "E.38", "E.40")
+_YP_VERSION_RE = re.compile(r"Version<b>(.*?)</b>")
+_YP_UPDATED_RE = re.compile(r"Updated<b>(.*?)</b>")
+_YP_ITEM_RE = re.compile(r"^\*\*(E\.\d+) — .*?`\[([A-Z]+)\]`", re.M)
+
+
+def yellowpaper_facts(text: str) -> dict:
+    """version, updated date, and per tracked open item its status tag + a hash of its paragraph."""
+    vm, um = _YP_VERSION_RE.search(text), _YP_UPDATED_RE.search(text)
+    items: Dict[str, dict] = {}
+    for m in _YP_ITEM_RE.finditer(text):
+        tag = m.group(1)
+        if tag not in YP_ITEMS:
+            continue
+        end = text.find("\n\n", m.start())
+        block = text[m.start():end if end > 0 else len(text)]
+        items[tag] = {"status": m.group(2), "sha": hashlib.sha256(block.encode("utf-8")).hexdigest()[:12]}
+    return {"version": vm.group(1).strip() if vm else None, "updated": um.group(1).strip() if um else None, "items": items}
+
+
+def yellowpaper_summary(old: dict, new: dict) -> str:
+    """One deterministic line naming what moved between two fact sets."""
+    bits = []
+    if old["version"] != new["version"]:
+        bits.append(f"version {old['version'] or '?'} → {new['version'] or '?'}")
+    if old["updated"] != new["updated"]:
+        bits.append(f"updated {old['updated'] or '?'} → {new['updated'] or '?'}")
+    for tag in YP_ITEMS:
+        o, n = old["items"].get(tag), new["items"].get(tag)
+        if o is None and n is None:
+            continue
+        if o is None:
+            bits.append(f"{tag} appeared [{n['status']}]")
+        elif n is None:
+            bits.append(f"{tag} GONE (was [{o['status']}]; ratified into a section?)")
+        elif o["status"] != n["status"]:
+            bits.append(f"{tag} [{o['status']}] → [{n['status']}]")
+        elif o["sha"] != n["sha"]:
+            bits.append(f"{tag} text changed (still [{n['status']}])")
+    return "; ".join(bits) or "text changed outside version/date/" + ",".join(YP_ITEMS)

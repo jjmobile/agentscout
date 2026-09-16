@@ -76,13 +76,17 @@ def test_log_handler_filters_transient_noise_and_counts():
     ing.warning("write /kv/did/abc: HTTP 500 Internal Server Error")
     ing.warning("write /kv/agentscout/new failed: POST /kv/agentscout/new: TimeoutError")
     ing.warning("TECHNOCORE VERSION CHANGED 0.7.0 -> 0.8.0")
+    ing.warning("TECHNOCORE DOCS CHANGED: llms.txt +FAUCET; NEW KEYWORDS: faucet")
+    ing.warning("FLOP YELLOW PAPER CHANGED: E.38 [TBD] → [RATIFY]")
+    ing.warning("yellow paper watch: GET https://raw.githubusercontent.com/x: URLError")
     pub.warning("NOTE_TAMPERED /kv/agentscout/top")
     pub.warning("post to d-x rejected (400)")
     ing.error("cycle failed")
     ing.removeHandler(h); pub.removeHandler(h)
     sent = [c[1].decode() for c in p.calls]
-    assert len(sent) == 4
+    assert len(sent) == 6
     assert any("VERSION CHANGED" in s for s in sent) and any("NOTE_TAMPERED" in s for s in sent) and any("cycle failed" in s for s in sent)
-    assert counter.counts == {"transient_http_errors": 3, "ring_gaps": 1}
-    assert counter.summary_and_reset() == "1 ring gaps, 3 transient http errors"
+    assert any("DOCS CHANGED" in s for s in sent) and any("YELLOW PAPER CHANGED" in s for s in sent)
+    assert counter.counts == {"transient_http_errors": 4, "ring_gaps": 1}
+    assert counter.summary_and_reset() == "1 ring gaps, 4 transient http errors"
     assert counter.counts == {}

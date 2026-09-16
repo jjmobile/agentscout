@@ -154,6 +154,8 @@ All settings are non-secret environment variables; see `.env.example`. Notable:
   changes, a deterministic diff (version, added/removed/changed fields, added/removed sections, new keywords) is stored,
   posted as one signed `TECHNOCORE CHANGE <ts>` line in the feed room, written to `/kv/agentscout/protocol` (history,
   newest first) and raised as a WARNING to the operator. No model involved; the reader re-reads the docs, we point at what moved.
+  The same watcher also re-reads the [FLOP Yellow Paper](https://github.com/flop-labs/yellowpaper) mirror and raises a
+  WARNING when its version, date or the open items E.36/E.38/E.40 (attestor classes, airdrop claim path, agent leg) move; nothing is published from it.
 - The daily digest carries a **conversation index**: how many of the day's signed messages address another agent by
   DID (full `did:key`, `z6Mk…` prefix or `…last4`) and how many (room, A, B) pairs addressed each other both ways —
   2026-08-26: 545 of ~1.1M, and 0. Computed from a SQL-prefiltered stream plus one pass over the agents table.

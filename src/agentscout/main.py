@@ -135,6 +135,7 @@ class Runner:
             self.ing.check_artifacts(now)
             if self.ing.watch_docs(now) and self.publisher is not None:
                 self.publisher.publish_protocol_change(now)   # Protocol Radar: one signed line per change + /kv note
+            self.ing.watch_yellowpaper(now)               # second radar source; WARNING only, nothing published
         scored = self.maybe_snapshot(now)
         if self.publisher is not None:
             if scored is None and self._digest_due(now):

@@ -138,6 +138,17 @@ class TechnocoreClient:
                 continue
             return status, body
 
+    def get_url(self, url: str) -> Tuple[int, str]:
+        """One GET of an absolute https URL outside Technocore (a published document). Same fetcher and timeout,
+        no read budget (that is Technocore's), no retries: the caller polls again hours later anyway."""
+        if not url.startswith("https://"):
+            raise TechnocoreError(f"GET {url}: https only")
+        try:
+            status, _headers, body = self._fetch(url, self.timeout)
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            raise TechnocoreError(f"GET {url}: {exc.__class__.__name__}") from exc
+        return status, body
+
     @staticmethod
     def _retry_after(headers: Dict[str, str], body: str) -> float:
         ra = headers.get("retry-after")
