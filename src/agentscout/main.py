@@ -127,15 +127,17 @@ class Runner:
         new_rooms = self.ing.poll_events(now)
         if new_rooms:
             log.info("events: %d new public rooms announced", new_rooms)
+        # Protocol Radar before the rooms: both watches self-gate to every docs_watch_hours (2-3 GETs), and the
+        # room poll spends the whole cycle budget under load (574/575 cycles on 2026-09-16), which starved them.
+        if self.ing.watch_docs(now) and self.publisher is not None:
+            self.publisher.publish_protocol_change(now)   # one signed line per change + /kv note
+        self.ing.watch_yellowpaper(now)                   # second radar source; WARNING only, nothing published
         self.ing.poll_rooms(now, deadline=deadline)
         if self.worker is not None and self.worker.tick(now) and self.publisher is not None:
             self.publisher.flush_outbox(now)          # accept right after the board was read: offers are a race
         if time.monotonic() < deadline:
             self.ing.scan_notes(now)
             self.ing.check_artifacts(now)
-            if self.ing.watch_docs(now) and self.publisher is not None:
-                self.publisher.publish_protocol_change(now)   # Protocol Radar: one signed line per change + /kv note
-            self.ing.watch_yellowpaper(now)               # second radar source; WARNING only, nothing published
         scored = self.maybe_snapshot(now)
         if self.publisher is not None:
             if scored is None and self._digest_due(now):
