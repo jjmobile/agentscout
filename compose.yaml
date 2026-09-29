@@ -5,7 +5,9 @@ services:
       context: .
     image: agentscout:0.1.0a1
     container_name: agentscout-agent
-    restart: unless-stopped
+    # 2026-09-29: "always". unless-stopped is not reliable across Mac reboots
+    # with Docker Desktop.
+    restart: always
     read_only: true
     init: true
     user: "10001:10001"
