@@ -134,6 +134,17 @@ MIGRATIONS: List[str] = [
     INSERT INTO payer_deals(offer_id, day, offer_json, contract, accept_json, state, updated_at)
         SELECT offer_id, day, offer_json, contract, accept_json, state, updated_at FROM tclk_deals;
     """,
+    # 10: W5 — paid inference sessions on the FLOP compute channel (one row per channel; amounts are
+    #     u128 base-unit strings, hashes hex). The first SETTLED row is the airdrop-qualifying spend.
+    """
+    CREATE TABLE flop_sessions (
+        channel_id TEXT PRIMARY KEY, day TEXT NOT NULL, miner TEXT NOT NULL, model TEXT,
+        escrow_base TEXT NOT NULL, nonce INTEGER NOT NULL, agent_key TEXT NOT NULL, state TEXT NOT NULL,
+        turns INTEGER NOT NULL DEFAULT 0, aggregate_gn TEXT, final_root TEXT, payable TEXT, receipt_sig TEXT,
+        open_tx TEXT, settle_tx TEXT, error TEXT, opened_at TEXT NOT NULL, closed_at TEXT
+    );
+    CREATE INDEX flop_sessions_day ON flop_sessions(day);
+    """,
 ]
 
 
@@ -720,6 +731,40 @@ class Storage:
         if not row or not row["d"]:
             return {}
         return {r["did"]: r["score"] for r in self.conn.execute("SELECT did,score FROM score_snapshots WHERE day=?", (row["d"],))}
+
+    # ---- W5 flop sessions ------------------------------------------------------------
+    def flop_next_channel_nonce(self) -> int:
+        """Monotonic per-account channel nonce (F.1 binds it into channel_id); never reused."""
+        n = int(self.get_setting("flop_channel_nonce") or "0") + 1
+        self.set_setting("flop_channel_nonce", str(n))
+        return n
+
+    def flop_session_open(self, channel_id: str, miner: str, model: str, escrow_base: int, nonce: int, open_tx: str,
+                          agent_key: str, now: str) -> None:
+        self.conn.execute(
+            "INSERT INTO flop_sessions(channel_id,day,miner,model,escrow_base,nonce,agent_key,state,open_tx,opened_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (channel_id, now[:10], miner, model, str(escrow_base), nonce, agent_key, "OPEN", open_tx, now))
+
+    def flop_session_close(self, channel_id: str, turns: int, aggregate_gn: str, final_root: str, payable: str,
+                           receipt_sig: str, settle_tx: str, now: str) -> None:
+        self.conn.execute(
+            "UPDATE flop_sessions SET state='CLOSED', turns=?, aggregate_gn=?, final_root=?, payable=?, receipt_sig=?, settle_tx=?, closed_at=? WHERE channel_id=?",
+            (turns, aggregate_gn, final_root, payable, receipt_sig, settle_tx, now, channel_id))
+
+    def flop_session_fail(self, channel_id: str, error: str, now: str) -> None:
+        self.conn.execute("UPDATE flop_sessions SET state='FAILED', error=?, closed_at=? WHERE channel_id=?", (error, now, channel_id))
+
+    def flop_session_settled(self, channel_id: str, now: str) -> None:
+        self.conn.execute("UPDATE flop_sessions SET state='SETTLED', closed_at=COALESCE(closed_at,?) WHERE channel_id=?", (now, channel_id))
+
+    def flop_session(self, channel_id: str) -> Optional[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM flop_sessions WHERE channel_id=?", (channel_id,)).fetchone()
+
+    def flop_sessions_today(self, day: str) -> int:
+        return self.conn.execute("SELECT COUNT(*) AS n FROM flop_sessions WHERE day=? AND state!='FAILED'", (day,)).fetchone()["n"]
+
+    def flop_sessions_recent(self, limit: int = 20) -> List[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM flop_sessions ORDER BY opened_at DESC LIMIT ?", (limit,)).fetchall()
 
     def counts(self) -> Dict[str, int]:
         out = {}

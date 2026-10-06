@@ -27,8 +27,10 @@ def test_flop_provider_discovers_the_endpoint_from_agent_json(storage, tmp_path)
     p = make_provider(s, storage, None)
     storage.set_doc_snapshot("agent.json", json.dumps({"endpoints": {"inference": "/inference/run"}}), "2026-09-04T00:00Z")
     assert p.endpoint() == "/inference/run"
-    with pytest.raises(InferenceUnavailable, match="client not implemented yet"):
-        p.messages.parse(model="x", max_tokens=10, messages=[])     # endpoint known, POST still to build
+    from agentscout.identity import Identity
+    p.bind_identity(Identity.load_or_create(str(tmp_path / "id.key"))[0])
+    with pytest.raises(InferenceUnavailable, match="no Flop RPC configured"):
+        p.messages.parse(model="x", max_tokens=10, messages=[])     # endpoint known, no testnet RPC yet → honest stop
 
 
 def test_radar_watches_for_inference_keywords():

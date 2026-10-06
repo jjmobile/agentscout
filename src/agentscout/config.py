@@ -150,6 +150,16 @@ class Settings:
     # Milestone C — Claude summaries
     model: str = "claude-opus-5"
     inference_provider: str = "anthropic"   # P6 seam: 'anthropic' | 'flop' (routes inference + FLOP spend via Flop)
+    # W5 — FLOP compute channel (all empty/off until a testnet exists; see flopchain/flopsession)
+    flop_rpc_url: str = ""                  # Substrate RPC (ws:// or http://); empty = NullChain, provider unavailable
+    flop_miner_url: str = ""                # miner session endpoint (provisional HTTP transport); empty = unavailable
+    flop_pallet: str = "ComputeChannel"     # runtime pallet name for open_channel (metadata is the final word)
+    flop_ss58_prefix: int = 42              # display prefix; FLOP's own is unpublished (§9.3 R9.8)
+    flop_escrow_flop: float = 1.0           # reserved escrow per session = the price (R12.1a); ≤ agent_per_tx_limit 100
+    flop_min_balance_flop: float = 11.0     # keep ≥ identity stake (10) + existential deposit headroom after escrow
+    flop_max_sessions_per_day: int = 100    # guard under the 500 FLOP/day agent-wallet cap
+    flop_session_key_path: str = "/data/flop_session.key"
+    flop_session_key_days: int = 9          # rotate under the ≤10-day SessionKeysMaxDuration
     effort: str = "low"
     max_tokens: int = 1024
     max_summaries_per_hour: int = 20
@@ -225,6 +235,15 @@ class Settings:
             model=os.environ.get("SCOUT_MODEL", "claude-opus-5").strip(),
             inference_provider=os.environ.get("SCOUT_INFERENCE_PROVIDER", "anthropic").strip().lower(),
             effort=_effort(os.environ.get("SCOUT_EFFORT", "low")),
+            flop_rpc_url=os.environ.get("FLOP_RPC_URL", "").strip(),
+            flop_miner_url=os.environ.get("FLOP_MINER_URL", "").strip(),
+            flop_pallet=os.environ.get("FLOP_PALLET", "ComputeChannel").strip() or "ComputeChannel",
+            flop_ss58_prefix=_int("FLOP_SS58_PREFIX", 42, 0, 63),
+            flop_escrow_flop=_float("FLOP_ESCROW_FLOP", 1.0),
+            flop_min_balance_flop=_float("FLOP_MIN_BALANCE_FLOP", 11.0),
+            flop_max_sessions_per_day=_int("FLOP_MAX_SESSIONS_PER_DAY", 100, 0, 10000),
+            flop_session_key_path=os.environ.get("FLOP_SESSION_KEY_PATH", "/data/flop_session.key"),
+            flop_session_key_days=_int("FLOP_SESSION_KEY_DAYS", 9, 1, 9),
             max_tokens=_int("SCOUT_MAX_TOKENS", 1024, 256, 16000),
             max_summaries_per_hour=_int("SCOUT_MAX_SUMMARIES_PER_HOUR", 20, 0, 1000),
             summaries_per_cycle=_int("SCOUT_SUMMARIES_PER_CYCLE", 3, 0, 50),
@@ -257,6 +276,8 @@ class Settings:
             raise ConfigError("SCOUT_PUBLISH_ENABLED=true requires DRY_RUN=false.")
         if not s.feed_room.startswith("d-"):
             raise ConfigError("SCOUT_FEED_ROOM must be an ownable d- room.")
+        if not 0 < s.flop_escrow_flop <= 100:
+            raise ConfigError("FLOP_ESCROW_FLOP must be in (0, 100] (agent_per_tx_limit is 100 FLOP).")
         return s
 
     @property

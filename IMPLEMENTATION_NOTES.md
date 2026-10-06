@@ -83,3 +83,39 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
     0.125.0 for local Python 3.9 dev — both expose the same `messages.parse(output_format=…)` surface and both passed the
     startup smoke check. `main` is protected (no force-push/deletion, linear history); Dependabot vulnerability alerts on.
     Bump pins deliberately: edit pyproject, rebuild, watch the smoke check, commit.
+
+## W5 — FLOP compute-channel client (2026-10-06, built the day flop.finance published the testnet/airdrop draft)
+
+34. **Why now.** flop.finance/airdrop (2026-10-05): the agent pool (1.2bn) is shared pro rata to *compute purchased in
+    settled sessions* during the ~90-day testnet; faucet grants and holding earn nothing. The Yellow Paper's only agent
+    metric is the same (E.38/E.40 placeholder). So the one thing to have ready on testnet day one is a client that can
+    open a channel, verify every turn, co-sign, and hand over a receipt — the modules below. Nothing here runs today:
+    without `FLOP_RPC_URL` the provider reports itself unavailable and the summarizer stays off (honest stub, as before).
+35. **Modules.** `flopchannel.py` — Appendix F wire format, stdlib only: channel id (F.1), V0–V3 leaves, Merkle
+    accumulator, per-turn ack and agent receipt v1 preimages, FCC4 transcript encode/decode, SCALE `VerifiedTurn`,
+    fail-closed checks; every byte is pinned by `tests/data/flop-wire-format-v1.json` (Labs' public-canonical corpus,
+    incl. the 15 negative cases). `flopkeys.py` — the sr25519 *session* key (`agent_key`; F.0 Substrate context),
+    0600 file, rotates after 9 days (§6.2 ≤10-day cap), old file kept as `.prev`; `py-sr25519-bindings` imported lazily.
+    `flopchain.py` — `open_channel` as our ed25519 account via substrate-interface (duck-typed `iface`, tested with a
+    double); the channel id is derived locally and cross-checked against the `ChannelOpened` event (an F.1 mismatch is
+    a stop). `flopsession.py` — one session end to end with guards (daily cap, escrow + 11 FLOP headroom), strictly
+    consecutive turns, `h_in`/`h_out` must hash our prompt / the delivered output, cooperative close pays the full
+    escrow (R12.1a). `inference.FlopProvider` renders the summarizer's call into one prompt, runs a session, validates
+    the JSON against `output_format` — the summarizer and its guards are untouched.
+36. **Verified.** The corpus signatures (receipt, ack, V3 leaf) verify under `sr25519.verify` with the Substrate
+    context on python:3.12 linux/arm64 — curve and byte layouts confirmed, not assumed. `h_ids` was cross-checked
+    against the corpus too. Locally (macOS, Python 3.9) the sr25519 test skips: no wheel, no Rust toolchain.
+37. **Provisional, by design.** The miner-facing transport (`HttpMinerTransport`: hello / turns / acks / close as JSON)
+    is our own shape because Labs has not published the SOFT-tier stream protocol (E.33); it is one class to replace.
+    Pallet/call names and `sla`/`precision`/`settlement_class` encodings follow App. G.1 and are configurable
+    (`FLOP_PALLET`) because the runtime metadata, not the paper, is final. `decode_policy_hash` comes from the miner's
+    hello and is pinned for the channel (R12.1j); leaves with another policy or a V0/V1 tag are rejected (F.3 cutoff).
+38. **Dependencies.** `pyproject` optional group `flop = py-sr25519-bindings==0.2.4, substrate-interface==1.8.1` (pip's
+    resolver report on python:3.12 linux/arm64, 2026-10-06: all 32 packages ship wheels — no compiler needed; the first
+    install is slow only because the resolver backtracks through substrate-interface's loose pins). The
+    image still installs `.` (no new code in the live container during the hold). Go-live = set `FLOP_RPC_URL`,
+    `FLOP_MINER_URL`, `SCOUT_INFERENCE_PROVIDER=flop`, change the Dockerfile's `pip install .` to `.[flop]`, rebuild,
+    watch the smoke check; the first `flop_sessions` row in state CLOSED/SETTLED is the W5 definition of done.
+39. **Chain facts the client relies on** (Yellow Paper v0.5.0 + corpus): u128 base units are 10⁻¹⁸ FLOP; agent wallet
+    caps 100 FLOP/tx and 500 FLOP/day (defaults: 1 FLOP escrow/session, ≤100 sessions/day); identity stake 10 FLOP;
+    session key ≤ 864,000 blocks; `settle` is the miner's extrinsic carrying our receipt; disputes are fraud-only.

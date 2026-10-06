@@ -104,6 +104,14 @@ class Identity:
             pass
         return cls(key), True
 
+    def public_bytes(self) -> bytes:
+        """The raw 32-byte Ed25519 public key = the FLOP AccountId (Yellow Paper §6.5)."""
+        return self._key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+
+    def private_seed(self) -> bytes:
+        """The 32-byte seed, for signing chain extrinsics as this account (W5). Handle like the key file."""
+        return self._key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+
     def sign(self, payload: bytes) -> str:
         """base64url, unpadded (86 chars) — Technocore's signature encoding. Not used in Milestone A."""
         return base64.urlsafe_b64encode(self._key.sign(payload)).decode("ascii").rstrip("=")

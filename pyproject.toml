@@ -19,6 +19,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5"]
+# W5: the FLOP chain client. Not in the default image until a testnet RPC exists — install with `.[flop]`
+# (Dockerfile: change `.` to `.[flop]`) the day FLOP_RPC_URL is set. Pinned like everything else.
+flop = ["py-sr25519-bindings==0.2.4", "substrate-interface==1.8.1"]
 
 [project.scripts]
 agentscout = "agentscout.main:cli"

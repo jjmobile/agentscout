@@ -56,6 +56,8 @@ class Runner:
         ident, created = Identity.load_or_create(self.s.identity_key_path)
         log.info("identity: did=%s fp=%s (%s)", ident.did, ident.fp, "CREATED — back up %s now" % self.s.identity_key_path if created else "loaded")
         self.db.set_setting("own_did", ident.did)
+        if self.summarizer is not None and hasattr(self.summarizer.client, "bind_identity"):
+            self.summarizer.client.bind_identity(ident)      # W5: the Flop provider spends as this account
         self.publisher = Publisher(self.s, self.client, self.db, ident, notify=self.notify)
         if self.s.credence_task_enabled and self.s.will_publish:
             from .selfaudit import SelfAudit

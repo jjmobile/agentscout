@@ -29,6 +29,12 @@ services:
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
       TELEGRAM_PUBLIC_BOT_TOKEN_FILE: /run/secrets/telegram_public_bot_token
       ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+      # W5 — FLOP compute channel (testnet go-live; all off until then; see IMPLEMENTATION_NOTES.md §34–39):
+      # SCOUT_INFERENCE_PROVIDER: flop
+      # FLOP_RPC_URL: wss://rpc.testnet.flop.example      # Substrate RPC; empty = provider unavailable
+      # FLOP_MINER_URL: https://miner.example             # miner session endpoint (provisional transport)
+      # FLOP_ESCROW_FLOP: "1.0"                           # reserved escrow = price per session (≤100)
+      # FLOP_MAX_SESSIONS_PER_DAY: "100"                  # under the 500 FLOP/day agent-wallet cap
     secrets:
       - telegram_bot_token
       - telegram_public_bot_token
