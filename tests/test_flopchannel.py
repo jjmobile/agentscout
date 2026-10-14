@@ -17,7 +17,7 @@ def _leaf_inputs():
     return dict(
         channel_id=H(li["channel_id_hex"]), turn_index=li["turn_index"], h_in=H(li["h_in_hex"]), h_out=H(li["h_out_hex"]),
         g_n=int(li["g_n"]), policy=H(li["decode_policy_hash_hex"]), ids=H(li["h_ids_hex"]), toploc=H(li["toploc_commitment_hash_hex"]),
-        recv=int(li["miner_recv_ms"]), done=int(li["miner_done_ms"]), lat=li["latency_ms"],
+        recv=int(li["miner_recv_ms"]), done=int(li["miner_done_ms"]), lat=int(li["latency_ms"]),
     )
 
 
@@ -70,18 +70,25 @@ def test_fixed_integers_reject_overflow_and_negatives():
 def test_channel_id_vector_and_binding():
     v = CC["channel_id"]
     i = v["inputs"]
-    cid = fc.channel_id_v1(H(i["genesis_hash_hex"]), H(i["agent_account_id32_hex"]), H(i["miner_account_id32_hex"]), i["nonce"])
+    cid = fc.channel_id_v1(H(i["genesis_hash_hex"]), H(i["agent_account_id32_hex"]), H(i["miner_account_id32_hex"]), int(i["nonce"]))
     assert cid.hex() == v["hash_hex"]
     assert (fc.CHANNEL_ID_DOMAIN_V1 + b"\x01" + H(i["genesis_hash_hex"]) + H(i["agent_account_id32_hex"])
-            + H(i["miner_account_id32_hex"]) + i["nonce"].to_bytes(8, "little")).hex() == v["preimage_hex"]
+            + H(i["miner_account_id32_hex"]) + int(i["nonce"]).to_bytes(8, "little")).hex() == v["preimage_hex"]
     neg = {n["id"]: n for n in CORPUS["negative_cases"]}
-    other_genesis = fc.channel_id_v1(bytes(32), H(i["agent_account_id32_hex"]), H(i["miner_account_id32_hex"]), i["nonce"])
+    other_genesis = fc.channel_id_v1(bytes(32), H(i["agent_account_id32_hex"]), H(i["miner_account_id32_hex"]), int(i["nonce"]))
     assert other_genesis.hex() != v["hash_hex"] and "wrong_genesis_network" in neg
-    other_agent = fc.channel_id_v1(H(i["genesis_hash_hex"]), bytes(32), H(i["miner_account_id32_hex"]), i["nonce"])
+    other_agent = fc.channel_id_v1(H(i["genesis_hash_hex"]), bytes(32), H(i["miner_account_id32_hex"]), int(i["nonce"]))
     assert other_agent.hex() != v["hash_hex"] and "wrong_session" in neg
 
 
 # ── F.3 leaves, merkle, ack, receipt ──────────────────────────────────────────────────────────────
+
+def test_h_ids_vectors():
+    for v in CORPUS["h_ids_v1"]["vectors"]:
+        assert fc.h_ids(v["prompt_ids"], v["generated_ids"]).hex() == v["hash_hex"], v["id"]
+    leaf = next(v for v in CORPUS["h_ids_v1"]["vectors"] if v["id"] == "leaf_fixture")
+    assert leaf["hash_hex"] == CC["leaf_inputs"]["h_ids_hex"]
+
 
 def test_leaf_preimages_and_hashes_all_versions():
     cid = _leaf_inputs()["channel_id"]
@@ -132,7 +139,7 @@ def test_ack_and_receipt_preimages():
     assert fc.ack_message(cid, _leaf_inputs()["turn_index"], leaf, int(a["agent_send_ms"]), int(a["agent_recv_ms"])).hex() == a["ack_preimage_hex"]
     r = CC["receipt"]
     i = r["inputs"]
-    assert fc.receipt_message_v1(H(i["channel_id_hex"]), H(i["final_root_hex"]), i["aggregate_gn"], i["payable"]).hex() == r["preimage_hex"]
+    assert fc.receipt_message_v1(H(i["channel_id_hex"]), H(i["final_root_hex"]), int(i["aggregate_gn"]), int(i["payable"])).hex() == r["preimage_hex"]
     legacy = next(n for n in CORPUS["negative_cases"] if n["id"] == "legacy_receipt_current_channel")
     assert not legacy["bytes_hex"].startswith(fc.RECEIPT_DOMAIN_V1.hex())   # the untagged 96 B form carries no domain: not v1
 
@@ -191,10 +198,10 @@ def test_corpus_signatures_verify_under_sr25519():
     fc.verify_ack(cid, turns[0], H(a["agent_public_key_hex"]), verify)
     r = CC["receipt"]
     i = r["inputs"]
-    fc.verify_receipt(H(i["channel_id_hex"]), H(i["final_root_hex"]), i["aggregate_gn"], i["payable"], H(r["public_key_hex"]), H(r["signature_hex"]), verify)
+    fc.verify_receipt(H(i["channel_id_hex"]), H(i["final_root_hex"]), int(i["aggregate_gn"]), int(i["payable"]), H(r["public_key_hex"]), H(r["signature_hex"]), verify)
     neg = {n["id"]: n for n in CORPUS["negative_cases"]}
     with pytest.raises(fc.WireError):
-        fc.verify_receipt(H(i["channel_id_hex"]), H(i["final_root_hex"]), i["aggregate_gn"], i["payable"], H(r["public_key_hex"]), H(neg["invalid_receipt_signature"]["bytes_hex"]), verify)
+        fc.verify_receipt(H(i["channel_id_hex"]), H(i["final_root_hex"]), int(i["aggregate_gn"]), int(i["payable"]), H(r["public_key_hex"]), H(neg["invalid_receipt_signature"]["bytes_hex"]), verify)
     with pytest.raises(fc.WireError):
         _, bad = fc.decode_transcript(H(neg["invalid_agent_ack_signature"]["bytes_hex"]))
         fc.verify_ack(cid, bad[0], H(a["agent_public_key_hex"]), verify)
