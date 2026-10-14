@@ -21,9 +21,9 @@ from .technocore import TechnocoreClient, TechnocoreError
 log = logging.getLogger("agentscout.commerce")
 
 AMOUNT = "200"                        # the task mill's going rate on the paper rail (W3, 2026-09-09); was 1000000
-OFFER_OPEN_HOURS = 6                  # expiresMs: offer dies unanswered after this
-CLAIM_BY_HOURS = 20                   # payee's safe claim window ends here
-REFUND_AFTER_HOURS = 22               # we may reclaim (and close the day's deal) from here
+OFFER_OPEN_HOURS = 1                  # expiresMs: offer dies unanswered after this (accepts land in seconds; 6 h blocked the slot)
+CLAIM_BY_HOURS = 2                    # payee's safe claim window ends here (honest payees reveal ~2 min after our lock)
+REFUND_AFTER_HOURS = 3                # we may reclaim (and close the deal) from here; a no-show payee no longer blocks a day
 DEAL_ROOM_POLL_SECONDS = 120          # while a deal is live, read its room at most this often
 OFFER_SPACING_MINUTES = 20            # pairings: earliest next offer after the previous deal of the day closed
 ACCEPT_WINDOW_SECONDS = 40            # accepts land ~1 s after an offer (p50 1.1 s, p90 3.3 s on 2026-09-11)
