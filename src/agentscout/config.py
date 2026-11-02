@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import List
 from urllib.parse import urlsplit
 
@@ -46,9 +48,30 @@ def _float(name: str, default: float) -> float:
         val = float(raw)
     except ValueError as exc:
         raise ConfigError(f"{name}: expected a number, got {raw!r}") from exc
-    if val < 0:
-        raise ConfigError(f"{name}: must be >= 0")
+    if not math.isfinite(val) or val < 0:
+        raise ConfigError(f"{name}: must be finite and >= 0")
     return val
+
+
+def _amount(name: str, default: str) -> str:
+    """Preserve exact FLOP base units; never round money through a binary float."""
+    raw = os.environ.get(name, default).strip() or default
+    try:
+        if len(raw) > 64:
+            raise ValueError()
+        val = Decimal(raw)
+        if not val.is_finite() or val < 0 or val > Decimal('1000000000'):
+            raise ValueError()
+        if val and val.adjusted() < -18:
+            raise ValueError()
+        with localcontext() as context:
+            context.prec = 90
+            units = val * 10 ** 18
+        if units != units.to_integral_value():
+            raise ValueError()
+    except (InvalidOperation, ValueError):
+        raise ConfigError(f"{name}: expected a nonnegative FLOP amount with at most 18 decimal places") from None
+    return format(val, 'f') if val else "0"
 
 
 def _effort(raw: str) -> str:
@@ -122,6 +145,9 @@ class Settings:
     freetext_queries: bool = False
     db_path: str = "/data/agentscout.db"
     identity_key_path: str = "/data/identity.key"
+    require_existing_identity: bool = False
+    expected_did: str = ""
+    source_revision: str = "unknown"
     # Milestone B — publishing
     publish_enabled: bool = False
     feed_room: str = "d-agentscout-feed"
@@ -155,8 +181,14 @@ class Settings:
     flop_miner_url: str = ""                # miner session endpoint (provisional HTTP transport); empty = unavailable
     flop_pallet: str = "ComputeChannel"     # runtime pallet name for open_channel (metadata is the final word)
     flop_ss58_prefix: int = 42              # display prefix; FLOP's own is unpublished (§9.3 R9.8)
-    flop_escrow_flop: float = 1.0           # reserved escrow per session = the price (R12.1a); ≤ agent_per_tx_limit 100
-    flop_min_balance_flop: float = 11.0     # keep ≥ identity stake (10) + existential deposit headroom after escrow
+    flop_live_enabled: bool = False        # explicit launch gate; never enabled from a date or page text
+    flop_allow_provisional_transport: bool = False  # development only; existing API is not the official onboarding contract
+    flop_expected_genesis_hash: str = ""   # required network pin before the live signer is constructed
+    flop_escrow_flop: str = "1.0"          # exact decimal amounts, converted to integer base units by the ledger
+    flop_min_balance_flop: str = "11.0"
+    flop_max_daily_exposure_flop: str = "1.1"
+    flop_max_open_exposure_flop: str = "1.1"
+    flop_fee_reserve_flop: str = "0.1"
     flop_max_sessions_per_day: int = 100    # guard under the 500 FLOP/day agent-wallet cap
     flop_session_key_path: str = "/data/flop_session.key"
     flop_session_key_days: int = 9          # rotate under the ≤10-day SessionKeysMaxDuration
@@ -211,6 +243,9 @@ class Settings:
             freetext_queries=_bool("SCOUT_FREETEXT_QUERIES", False),
             db_path=os.environ.get("AGENTSCOUT_DB", "/data/agentscout.db"),
             identity_key_path=os.environ.get("AGENTSCOUT_IDENTITY_KEY", "/data/identity.key"),
+            require_existing_identity=_bool("AGENTSCOUT_REQUIRE_EXISTING_IDENTITY", False),
+            expected_did=os.environ.get("AGENTSCOUT_EXPECTED_DID", "").strip(),
+            source_revision=os.environ.get("AGENTSCOUT_SOURCE_REVISION", "unknown").strip() or "unknown",
             publish_enabled=_bool("SCOUT_PUBLISH_ENABLED", False),
             feed_room=_room("SCOUT_FEED_ROOM", "d-agentscout-feed"),
             kv_ns=_room("SCOUT_KV_NS", "agentscout"),
@@ -239,8 +274,14 @@ class Settings:
             flop_miner_url=os.environ.get("FLOP_MINER_URL", "").strip(),
             flop_pallet=os.environ.get("FLOP_PALLET", "ComputeChannel").strip() or "ComputeChannel",
             flop_ss58_prefix=_int("FLOP_SS58_PREFIX", 42, 0, 63),
-            flop_escrow_flop=_float("FLOP_ESCROW_FLOP", 1.0),
-            flop_min_balance_flop=_float("FLOP_MIN_BALANCE_FLOP", 11.0),
+            flop_live_enabled=_bool("FLOP_LIVE_ENABLED", False),
+            flop_allow_provisional_transport=_bool("FLOP_ALLOW_PROVISIONAL_TRANSPORT", False),
+            flop_expected_genesis_hash=os.environ.get("FLOP_EXPECTED_GENESIS_HASH", "").strip(),
+            flop_escrow_flop=_amount("FLOP_ESCROW_FLOP", "1.0"),
+            flop_min_balance_flop=_amount("FLOP_MIN_BALANCE_FLOP", "11.0"),
+            flop_max_daily_exposure_flop=_amount("FLOP_MAX_DAILY_EXPOSURE_FLOP", "1.1"),
+            flop_max_open_exposure_flop=_amount("FLOP_MAX_OPEN_EXPOSURE_FLOP", "1.1"),
+            flop_fee_reserve_flop=_amount("FLOP_FEE_RESERVE_FLOP", "0.1"),
             flop_max_sessions_per_day=_int("FLOP_MAX_SESSIONS_PER_DAY", 100, 0, 10000),
             flop_session_key_path=os.environ.get("FLOP_SESSION_KEY_PATH", "/data/flop_session.key"),
             flop_session_key_days=_int("FLOP_SESSION_KEY_DAYS", 9, 1, 9),
@@ -276,8 +317,20 @@ class Settings:
             raise ConfigError("SCOUT_PUBLISH_ENABLED=true requires DRY_RUN=false.")
         if not s.feed_room.startswith("d-"):
             raise ConfigError("SCOUT_FEED_ROOM must be an ownable d- room.")
-        if not 0 < s.flop_escrow_flop <= 100:
+        if not 0 < Decimal(s.flop_escrow_flop) <= 100:
             raise ConfigError("FLOP_ESCROW_FLOP must be in (0, 100] (agent_per_tx_limit is 100 FLOP).")
+        if s.inference_provider not in ("anthropic", "flop"):
+            raise ConfigError("SCOUT_INFERENCE_PROVIDER must be anthropic or flop.")
+        if s.expected_did:
+            from .identity import public_key_from_did
+            try:
+                public_key_from_did(s.expected_did)
+            except ValueError:
+                raise ConfigError("AGENTSCOUT_EXPECTED_DID must be an Ed25519 did:key.") from None
+        if s.flop_expected_genesis_hash:
+            import re
+            if not re.fullmatch(r"(?:0x)?[0-9a-fA-F]{64}", s.flop_expected_genesis_hash):
+                raise ConfigError("FLOP_EXPECTED_GENESIS_HASH must be a 32-byte hexadecimal hash.")
         return s
 
     @property

@@ -53,9 +53,20 @@ class Runner:
         log.info("agentscout %s starting: DRY_RUN=%s publish=%s llm=%s replies=%s db=%s rooms=%s",
                  __version__, self.s.dry_run, self.s.will_publish, self.s.llm_enabled, self.s.replies_enabled,
                  self.s.db_path, ",".join(self.s.watch_rooms))
-        ident, created = Identity.load_or_create(self.s.identity_key_path)
+        recorded_did = self.db.get_setting("own_did") or ""
+        if self.s.expected_did and recorded_did and self.s.expected_did != recorded_did:
+            raise ValueError("database identity differs from AGENTSCOUT_EXPECTED_DID; refusing to start")
+        ident, created = Identity.load_or_create(
+            self.s.identity_key_path,
+            allow_create=not self.s.require_existing_identity,
+            expected_did=self.s.expected_did or recorded_did,
+        )
         log.info("identity: did=%s fp=%s (%s)", ident.did, ident.fp, "CREATED — back up %s now" % self.s.identity_key_path if created else "loaded")
         self.db.set_setting("own_did", ident.did)
+        self.db.set_setting("deployed_source_revision", self.s.source_revision)
+        self.db.set_setting("inference_provider", self.s.inference_provider)
+        self.db.set_setting("flop_live_enabled", str(self.s.flop_live_enabled).lower())
+        self.db.set_setting("runtime_started_at", iso_now(self._now()))
         if self.summarizer is not None and hasattr(self.summarizer.client, "bind_identity"):
             self.summarizer.client.bind_identity(ident)      # W5: the Flop provider spends as this account
         self.publisher = Publisher(self.s, self.client, self.db, ident, notify=self.notify)
@@ -83,9 +94,11 @@ class Runner:
             self.summarizer.smoke()
         llm = "on (%s, effort %s, cap $%.2f/day)" % (self.s.model, self.s.effort or "default", self.s.max_daily_cost_usd) \
             if (self.summarizer is not None and self.summarizer.enabled) else "off"
+        if self.s.inference_provider == "flop" and self.summarizer is not None and self.summarizer.enabled:
+            llm = "on (FLOP, exposure budget %s/day; finalized settlement tracked separately)" % self.s.flop_max_daily_exposure_flop
         mode = "LIVE publishing to /r/%s" % self.s.feed_room if (self.s.will_publish and self.publisher.owner_verified) else "dry-run (nothing is posted)"
         now = self._now()
-        self._start_notice(now, f"AgentScout {__version__} started — {mode}\nDID {ident.did}\nfp {ident.fp}\nClaude summaries {llm}\ntelegram reporting on")
+        self._start_notice(now, f"AgentScout {__version__} started — {mode}\nDID {ident.did}\nfp {ident.fp}\nInference summaries {llm}\ntelegram reporting on")
         self.ing.discover_limits()
         if not self.db.get_setting("observation_started_at"):
             self.db.set_setting("observation_started_at", now.strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -123,6 +136,7 @@ class Runner:
 
     def cycle(self) -> None:
         now = self._now()
+        self.db.set_setting("runtime_heartbeat_at", iso_now(now))
         deadline = time.monotonic() + self.s.cycle_budget_seconds
         if self.publisher is not None:           # queued signed posts go out before any slow reading
             self.publisher.flush_outbox(now)

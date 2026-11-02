@@ -33,8 +33,8 @@ services:
       # SCOUT_INFERENCE_PROVIDER: flop
       # FLOP_RPC_URL: wss://rpc.testnet.flop.example      # Substrate RPC; empty = provider unavailable
       # FLOP_MINER_URL: https://miner.example             # miner session endpoint (provisional transport)
-      # FLOP_ESCROW_FLOP: "1.0"                           # reserved escrow = price per session (≤100)
-      # FLOP_MAX_SESSIONS_PER_DAY: "100"                  # under the 500 FLOP/day agent-wallet cap
+      # FLOP_ESCROW_FLOP: "1.0"                           # local pilot escrow; not an official price
+      # FLOP_MAX_SESSIONS_PER_DAY: "100"                  # local request guard; official faucet limits pending
     secrets:
       - telegram_bot_token
       - telegram_public_bot_token

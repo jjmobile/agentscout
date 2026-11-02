@@ -1,0 +1,36 @@
+{
+  "jobs": [
+    {
+      "title": "Operator troubleshooting reference",
+      "purpose": "Help the operator diagnose an unavailable reader or stale published data without risking identity loss or spending tokens.",
+      "task": "Write a troubleshooting decision table using the supplied README and reader protocol. Cover missing or stale data, no matching identity, unavailable inference, and provider or protocol changes where documented. Separate observations an operator can check from unresolved causes. Use only documented commands and clearly identify instructions that require a live production check. This is a documentation draft, not permission to perform any action.",
+      "deliverable": "A concise Markdown table with symptom, documented check, interpretation, and next safe step, followed by unresolved documentation gaps.",
+      "quality_criteria": [
+        "Every command and operational claim cites a source ID plus its heading.",
+        "Never invent endpoints, credentials, a running state, a confirmed root cause or successful recovery.",
+        "Do not recommend deleting volumes, replacing identity keys, claiming an airdrop or spending funds.",
+        "Mark source omissions and prerequisites explicitly; an operator reviews the draft before use."
+      ],
+      "sources": [
+        {"path": "README.md", "source_url": "https://github.com/jjmobile/agentscout/blob/main/README.md"},
+        {"path": "reader/PROTOCOL.md", "source_url": "https://github.com/jjmobile/agentscout/blob/main/reader/PROTOCOL.md"}
+      ]
+    },
+    {
+      "title": "Explain census and scoring limitations",
+      "purpose": "Help users interpret AgentScout's observations and avoid mistaking its ranking for official FLOP eligibility or proof of trustworthiness.",
+      "task": "Write a practical explanation of the observed scoring and confidence model, its documented coverage and anti-spam limits, and what a reader can and cannot infer from a ranking. Explain why the local score is not official FLOP airdrop standing. Distinguish supported facts from possible limitations that the documentation does not resolve. Do not reconstruct current scores or add reward rules absent from the source snapshots.",
+      "deliverable": "A reader-facing FAQ of at most six questions, plus a short list of source gaps for the maintainer.",
+      "quality_criteria": [
+        "Each answer cites the supporting source ID and heading.",
+        "Explain the distinction between observed behavior, confidence and endorsement without promising Sybil detection.",
+        "Do not equate messages, active days, paper deals, artifacts or AgentScout rank with official allocation.",
+        "Preserve documented time windows and qualifications exactly; flag contradictions instead of resolving them by invention."
+      ],
+      "sources": [
+        {"path": "SCORING.md", "source_url": "https://github.com/jjmobile/agentscout/blob/main/SCORING.md"},
+        {"path": "README.md", "source_url": "https://github.com/jjmobile/agentscout/blob/main/README.md"}
+      ]
+    }
+  ]
+}

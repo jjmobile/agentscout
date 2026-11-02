@@ -43,3 +43,29 @@ def test_invalid_room_name(monkeypatch):
     monkeypatch.setenv("SCOUT_WATCH_ROOMS", "lobby,Bad Room")
     with pytest.raises(ConfigError):
         Settings.from_env()
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-1", "0.0000000000000000001", "1.000000000000000000000000000001", "1e-999999999"])
+def test_money_limits_reject_invalid_values(monkeypatch, bad):
+    monkeypatch.setenv("FLOP_MAX_DAILY_EXPOSURE_FLOP", bad)
+    with pytest.raises(ConfigError):
+        Settings.from_env()
+
+
+def test_launch_is_closed_and_money_is_exact(monkeypatch):
+    for key in ("FLOP_LIVE_ENABLED", "FLOP_ALLOW_PROVISIONAL_TRANSPORT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("FLOP_ESCROW_FLOP", "1.000000000000000001")
+    s = Settings.from_env()
+    assert s.flop_escrow_flop == "1.000000000000000001"
+    assert not s.flop_live_enabled and not s.flop_allow_provisional_transport
+
+
+def test_bad_identity_and_chain_pins_rejected(monkeypatch):
+    monkeypatch.setenv("AGENTSCOUT_EXPECTED_DID", "new-identity")
+    with pytest.raises(ConfigError):
+        Settings.from_env()
+    monkeypatch.delenv("AGENTSCOUT_EXPECTED_DID")
+    monkeypatch.setenv("FLOP_EXPECTED_GENESIS_HASH", "fake")
+    with pytest.raises(ConfigError):
+        Settings.from_env()

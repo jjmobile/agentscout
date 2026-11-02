@@ -6,8 +6,8 @@ the thin, swappable layer between AgentScout and a Substrate node:
 
 * `NullChain` — no RPC configured (today): every call raises `ChainUnavailable`, so the provider reports
   "unavailable" honestly and nothing pretends to spend.
-* `SubstrateChain` — `substrate-interface` behind a duck-typed `iface` + `keypair`, so the composition is
-  unit-tested with fakes and goes live the day a testnet RPC URL exists (`FLOP_RPC_URL`). The pallet and
+* `SubstrateChain` — `substrate-interface` behind a duck-typed `iface` + `keypair`, with composition
+  unit-tested using fakes. A configured RPC is insufficient to authorize spending. The pallet and
   call names default to the paper's (`ComputeChannel.open_channel`) and are configurable because the
   runtime's metadata, not the paper, is the final word on spelling.
 
@@ -110,20 +110,35 @@ class SubstrateChain:
         self._genesis: Optional[bytes] = None
 
     @classmethod
-    def connect(cls, url: str, identity, pallet: str = DEFAULT_PALLET, ss58_prefix: int = DEFAULT_SS58_PREFIX) -> "SubstrateChain":
-        """Open a websocket/http connection with substrate-interface, signing as our ed25519 identity."""
+    def connect(cls, url: str, identity, pallet: str = DEFAULT_PALLET, ss58_prefix: int = DEFAULT_SS58_PREFIX,
+                expected_genesis_hash: str = "") -> "SubstrateChain":
+        """Verify the independently configured network identity before creating any signer."""
+        expected = expected_genesis_hash.removeprefix("0x")
+        try:
+            expected_bytes = bytes.fromhex(expected)
+            if len(expected_bytes) != 32:
+                raise ValueError
+        except ValueError as exc:
+            raise ChainUnavailable("expected FLOP genesis hash must be configured as 32-byte hex") from exc
         try:
             from substrateinterface import Keypair, KeypairType, SubstrateInterface  # type: ignore
         except ImportError as exc:
             raise ChainUnavailable("substrate-interface is not installed") from exc
         try:
             iface = SubstrateInterface(url=url, ss58_format=ss58_prefix)
+            genesis = iface.get_block_hash(0)
+            actual = bytes.fromhex(genesis[2:] if genesis.startswith("0x") else genesis)
+            if actual != expected_bytes:
+                raise ChainUnavailable("configured RPC genesis differs from the expected FLOP network")
+        except ChainUnavailable:
+            raise
         except Exception as exc:  # noqa: BLE001 — connection/metadata failures are "unavailable", not bugs
             raise ChainUnavailable(f"cannot connect to {url}: {exc.__class__.__name__}: {str(exc)[:160]}") from exc
         keypair = Keypair.create_from_seed(identity.private_seed().hex(), ss58_format=ss58_prefix, crypto_type=KeypairType.ED25519)
         if bytes(keypair.public_key) != identity.public_bytes():
             raise ChainUnavailable("substrate keypair does not reproduce the identity's public key")
         chain = cls(iface, keypair, pallet)
+        chain._genesis = actual
         log.info("flop chain connected: %s chain=%s account=%s", url, getattr(iface, "chain", "?"), keypair.ss58_address)
         return chain
 
@@ -217,4 +232,5 @@ def make_chain(settings, identity):
     if not url:
         return NullChain()
     return SubstrateChain.connect(url, identity, pallet=getattr(settings, "flop_pallet", DEFAULT_PALLET),
-                                  ss58_prefix=getattr(settings, "flop_ss58_prefix", DEFAULT_SS58_PREFIX))
+                                  ss58_prefix=getattr(settings, "flop_ss58_prefix", DEFAULT_SS58_PREFIX),
+                                  expected_genesis_hash=getattr(settings, "flop_expected_genesis_hash", ""))

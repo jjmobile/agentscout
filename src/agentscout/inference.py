@@ -1,14 +1,9 @@
-"""P6/W5 — the inference seam. AgentScout's cosmetic LLM summaries are the one place it *spends*
-on inference, and the $FLOP airdrop rewards exactly that: compute purchased in settled sessions on the
-testnet (flop.finance/airdrop, 2026-10-05). So the provider behind `summarizer.client.messages.parse(...)`
-is pluggable: 'anthropic' is the SDK client; 'flop' routes the same call through a FLOP compute channel
-(`flopsession`) and pays in FLOP, turning work we already do into airdrop-qualifying, non-wash demand.
+"""Pluggable inference for useful summaries, independent of the observer's critical path.
 
-The seam sits at provider *selection*, not inside the summarizer — the summarizer keeps speaking
-`messages.parse(**kw)` and reading `.parsed_output`, `.stop_reason`, `.id`, `.usage`, so every guard
-(cost cap, hourly cap, refusal skip, error disable) and every test is unchanged. Inference is never in
-the critical path: if the Flop provider is unavailable (no RPC, no miner, no sr25519), the startup smoke
-fails, summaries are simply skipped, and the census is unaffected.
+'anthropic' uses the SDK; 'flop' is a disabled experimental channel adapter awaiting official
+onboarding. Provider calls return parsed output and usage, but do not establish eligibility or
+allocation. FLOP exposure/evidence belongs in the durable journal; independent finalized settlement
+and official scoring are separate requirements. FLOP startup checks readiness without paid inference.
 """
 from __future__ import annotations
 
@@ -55,7 +50,7 @@ class _FlopMessages:
         against `output_format` (a pydantic model) exactly as the SDK's structured output would."""
         session = self._p.session()          # raises InferenceUnavailable with the precise reason
         prompt = _render_prompt(kwargs.get("system"), kwargs.get("messages") or [], kwargs.get("output_format"))
-        result = session.run([prompt])
+        result = session.run([prompt], request_id=kwargs.get("request_id"))
         schema = kwargs.get("output_format")
         parsed = _parse_output(schema, result.output)
         return FlopResponse(parsed, "end_turn", "flop:" + result.channel_id.hex(),
@@ -63,9 +58,9 @@ class _FlopMessages:
 
 
 class FlopProvider:
-    """Routes inference through the FLOP network. Honest about readiness: `session()` raises
-    `InferenceUnavailable` naming the first missing piece (sr25519, RPC, miner), so nothing pretends to
-    spend FLOP that cannot be spent. `model` and `.messages.parse` mirror the Anthropic client."""
+    """Disabled experimental FLOP adapter. `session()` requires explicit spending and development
+    opt-ins, then a pinned network, dependencies and miner. An official signed-HTTP provider may
+    replace it. `model` and `.messages.parse` mirror the Anthropic client."""
 
     name = "flop"
 
@@ -104,6 +99,10 @@ class FlopProvider:
         from .flopchain import ChainUnavailable, NullChain, make_chain
         from .flopsession import FlopSession, HttpMinerTransport
 
+        if not getattr(self.s, "flop_live_enabled", False):
+            raise InferenceUnavailable("FLOP spending is disabled (FLOP_LIVE_ENABLED=false)")
+        if not getattr(self.s, "flop_allow_provisional_transport", False):
+            raise InferenceUnavailable("provisional FLOP transport is blocked; wait for official signed-HTTP onboarding")
         miner_url = self.endpoint()
         if not miner_url:
             raise InferenceUnavailable("no Flop miner endpoint (FLOP_MINER_URL empty and agent.json advertises none)")
@@ -122,7 +121,8 @@ class FlopProvider:
                 self._key = flopkeys.SessionKey.load_or_create(self.s.flop_session_key_path, now, self.s.flop_session_key_days)
         except flopkeys.KeysUnavailable as exc:
             raise InferenceUnavailable(f"Flop session key: {exc}") from exc
-        transport = HttpMinerTransport(miner_url, timeout=max(30, int(getattr(self.s, "http_timeout", 12)) * 5))
+        transport = HttpMinerTransport(miner_url, timeout=max(30, int(getattr(self.s, "http_timeout", 12)) * 5),
+                                       allow_provisional=True)
         return FlopSession(self.s, self._chain, self._key, transport, self._db, flopkeys.verify)
 
 

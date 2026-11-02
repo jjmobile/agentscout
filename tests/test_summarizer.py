@@ -7,7 +7,7 @@ import pytest
 from agentscout import render
 from agentscout.config import Settings
 from agentscout.scoring import score
-from agentscout.summarizer import AgentSummary, Summarizer, build_evidence, estimate_usd, qualifies
+from agentscout.summarizer import AgentSummary, SmokeCheck, Summarizer, build_evidence, estimate_usd, qualifies
 from conftest import DID_A, DID_B, NOW
 
 
@@ -97,6 +97,20 @@ def test_cost_guard_blocks_before_call(storage, tmp_path, caplog):
     assert fm.calls == [] and "cost guard reached" in caplog.text
 
 
+def test_flop_usage_never_priced_as_anthropic(storage, tmp_path, caplog):
+    seed(storage)
+    fm = FakeMessages([resp(good())])
+    sm = Summarizer(settings(tmp_path, inference_provider="flop"), storage,
+                    SimpleNamespace(messages=fm), pricing=PRICING, system_prompt="SYS")
+    with caplog.at_level(logging.INFO):
+        assert sm.summarize(DID_A, facts_of(storage)[DID_A], NOW) == "OK"
+    row = storage.conn.execute("SELECT model,est_usd,status FROM usage_ledger").fetchone()
+    assert row["model"] == "flop" and row["est_usd"] == 0
+    assert "FLOP_JOURNAL" in row["status"]
+    assert "settlement separate" in caplog.text and "($" not in caplog.text
+    assert storage.summaries_since(T(-60)) == 1
+
+
 def test_hourly_cap_and_per_cycle_cap(storage, tmp_path):
     seed(storage, DID_A); seed(storage, DID_B)
     for i in range(20):
@@ -149,6 +163,70 @@ def test_smoke_failure_disables(storage, tmp_path):
     fm = FakeMessages([RuntimeError("boom")])
     sm = Summarizer(settings(tmp_path), storage, SimpleNamespace(messages=fm), pricing=PRICING, system_prompt="SYS")
     assert sm.smoke() is False and sm.enabled is False
+
+
+def test_anthropic_smoke_still_requests_and_accounts_for_tiny_call(storage, tmp_path):
+    fm = FakeMessages([resp(SmokeCheck(ok=True, word="ready"))])
+    sm = Summarizer(settings(tmp_path), storage, SimpleNamespace(messages=fm),
+                    pricing=PRICING, system_prompt="SYS")
+    assert sm.smoke() is True and sm.enabled is True
+    assert len(fm.calls) == 1
+    assert fm.calls[0]["output_format"] is SmokeCheck
+    assert fm.calls[0]["max_tokens"] == 64
+    row = storage.conn.execute("SELECT purpose,model,est_usd FROM usage_ledger").fetchone()
+    assert row["purpose"] == "smoke" and row["model"] == "claude-opus-5" and row["est_usd"] > 0
+
+
+def test_flop_smoke_restarts_without_inference_or_reservation(storage, tmp_path, monkeypatch):
+    from agentscout.flopsession import FlopSession, HttpMinerTransport
+    from agentscout.inference import FlopProvider
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("readiness must not run inference or contact the miner")
+
+    monkeypatch.setattr(FlopSession, "run", forbidden)
+    for method in ("hello", "turn", "ack", "close"):
+        monkeypatch.setattr(HttpMinerTransport, method, forbidden)
+    cfg = settings(tmp_path, inference_provider="flop", flop_live_enabled=True,
+                   flop_allow_provisional_transport=True, flop_miner_url="https://miner.invalid")
+    for _ in range(2):  # fresh summarizer/provider, same persistent journal: like a restart
+        provider = FlopProvider(cfg, storage, identity=object())
+        provider._chain = SimpleNamespace()  # prevalidated connection; no signing method available
+        provider._key = SimpleNamespace(age_days=lambda now: 0)
+        monkeypatch.setattr(provider.messages, "parse", forbidden)
+        sm = Summarizer(cfg, storage, provider, pricing=PRICING, system_prompt="SYS")
+        assert sm.smoke() is True and sm.enabled is True
+    assert storage.conn.execute("SELECT COUNT(*) FROM usage_ledger").fetchone()[0] == 0
+    assert storage.conn.execute("SELECT COUNT(*) FROM inference_requests").fetchone()[0] == 0
+    assert storage.conn.execute("SELECT COUNT(*) FROM inference_events").fetchone()[0] == 0
+    assert storage.conn.execute("SELECT COUNT(*) FROM flop_sessions").fetchone()[0] == 0
+
+
+def test_flop_smoke_disabled_gate_fails_before_any_request(storage, tmp_path, monkeypatch):
+    from agentscout import flopchain
+    from agentscout.inference import FlopProvider
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("disabled provider must not construct a chain or request inference")
+
+    monkeypatch.setattr(flopchain, "make_chain", forbidden)
+    cfg = settings(tmp_path, inference_provider="flop", flop_live_enabled=False)
+    provider = FlopProvider(cfg, storage)
+    monkeypatch.setattr(provider.messages, "parse", forbidden)
+    sm = Summarizer(cfg, storage, provider, pricing=PRICING, system_prompt="SYS")
+    assert sm.smoke() is False and sm.enabled is False
+    assert "FLOP spending is disabled" in sm.disabled_reason
+    assert storage.conn.execute("SELECT COUNT(*) FROM usage_ledger").fetchone()[0] == 0
+    assert storage.conn.execute("SELECT COUNT(*) FROM inference_requests").fetchone()[0] == 0
+
+
+def test_flop_smoke_invalid_readiness_fails_closed(storage, tmp_path):
+    fm = FakeMessages([])
+    sm = Summarizer(settings(tmp_path, inference_provider="flop"), storage,
+                    SimpleNamespace(messages=fm, session=lambda: None), pricing=PRICING, system_prompt="SYS")
+    assert sm.smoke() is False and sm.enabled is False
+    assert "usable session" in sm.disabled_reason
+    assert fm.calls == []
 
 
 def test_renders_without_summaries(storage):

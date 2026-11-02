@@ -2,6 +2,8 @@
 import hashlib
 import json
 import os
+import sys
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -178,3 +180,23 @@ def test_make_chain_null_without_url_and_identity_seed_round_trip(tmp_path):
     assert isinstance(flopchain.make_chain(S(), ident), flopchain.NullChain)
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     assert Identity(Ed25519PrivateKey.from_private_bytes(ident.private_seed())).did == ident.did
+
+
+def test_wrong_network_is_rejected_before_identity_seed_is_read(monkeypatch):
+    class IdentityMustStayUnread:
+        def private_seed(self):
+            pytest.fail("must not derive signer on an unpinned or mismatched network")
+
+    class Node:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_block_hash(self, number):
+            return "0x" + "aa" * 32
+
+    module = SimpleNamespace(SubstrateInterface=Node, Keypair=object, KeypairType=object)
+    monkeypatch.setitem(sys.modules, "substrateinterface", module)
+    with pytest.raises(flopchain.ChainUnavailable, match="must be configured"):
+        flopchain.SubstrateChain.connect("wss://unused.invalid", IdentityMustStayUnread())
+    with pytest.raises(flopchain.ChainUnavailable, match="differs from the expected"):
+        flopchain.SubstrateChain.connect("wss://unused.invalid", IdentityMustStayUnread(), expected_genesis_hash="bb" * 32)

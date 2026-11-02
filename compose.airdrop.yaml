@@ -1,0 +1,19 @@
+# Operator profile: docker compose -f compose.yaml -f compose.airdrop.yaml up -d --build
+# Preserve the existing Docker volume. Never use `down -v`.
+services:
+  agentscout:
+    build:
+      args:
+        AGENTSCOUT_SOURCE_REVISION: ${AGENTSCOUT_SOURCE_REVISION:-unknown}
+    environment:
+      AGENTSCOUT_REQUIRE_EXISTING_IDENTITY: "true"
+      AGENTSCOUT_EXPECTED_DID: did:key:z6MkwNoeDd24jWouuvbQkuCwf3a1o14ToqJiKezPcBQc3A7q
+      SCOUT_TCLK_ENABLED: "false"
+      SCOUT_WORKER_ENABLED: "false"
+      SCOUT_CREDENCE_TASK_ENABLED: "false"
+      # Launch is blocked until official onboarding and settlement verification exist.
+      FLOP_LIVE_ENABLED: "false"
+      FLOP_ALLOW_PROVISIONAL_TRANSPORT: "false"
+      FLOP_MAX_DAILY_EXPOSURE_FLOP: "1.1"
+      FLOP_MAX_OPEN_EXPOSURE_FLOP: "1.1"
+      FLOP_FEE_RESERVE_FLOP: "0.1"

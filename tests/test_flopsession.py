@@ -90,6 +90,8 @@ class FakeMiner:
 def _settings(tmp_path, **over):
     base = dict(watch_rooms=["lobby"], db_path=str(tmp_path / "t.db"), inference_provider="flop",
                 flop_rpc_url="ws://fake", flop_miner_url="http://miner.fake", flop_escrow_flop=2.0,
+                flop_live_enabled=True, flop_allow_provisional_transport=True,
+                flop_max_daily_exposure_flop="100", flop_max_open_exposure_flop="100",
                 flop_session_key_path=str(tmp_path / "sk.json"))
     base.update(over)
     return Settings(**base)
@@ -128,10 +130,10 @@ def test_session_rejects_tampered_output_and_bad_leaf_signature(storage, tmp_pat
     cid = sess.chain.opened[0]
     row = storage.flop_sessions_recent(1)[0]
     assert row["state"] == "FAILED" and "h_out" in row["error"] and miner.acks == [] and miner.closed is None
-    assert storage.flop_sessions_today("2026-10-20") == 0          # failed channels do not burn the daily cap
+    assert storage.flop_sessions_today("2026-10-20") == 1          # failure does not release an opened escrow
     sess2, miner2, _ = _session(tmp_path, storage, miner=FakeMiner(bad_sig=True))
     with pytest.raises(flopsession.SessionError, match="enclave signature"):
-        sess2.run(["x"])
+        sess2.run(["x"], request_id="different-work")
     assert storage.flop_sessions_recent(1)[0]["state"] == "FAILED" and cid.nonce == 1
 
 
@@ -142,7 +144,7 @@ def test_session_guards_balance_and_daily_cap(storage, tmp_path):
     sess, _, _ = _session(tmp_path, storage, flop_max_sessions_per_day=1)
     sess.run(["x"])
     with pytest.raises(flopsession.SessionError, match="daily session cap"):
-        sess.run(["x"])
+        sess.run(["different work"])
     assert sess.chain.opened and len(sess.chain.opened) == 1
 
 

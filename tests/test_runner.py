@@ -1,7 +1,31 @@
 from datetime import timedelta
+import pytest
 
 from agentscout.main import Runner
 from conftest import DID_A, NOW
+
+
+def test_missing_recorded_identity_stops_before_network(settings, client, storage, tmp_path):
+    from agentscout.identity import Identity
+    old_key = tmp_path / "old.key"
+    ident, _ = Identity.load_or_create(str(old_key))
+    storage.set_setting("own_did", ident.did)
+    settings.identity_key_path = str(tmp_path / "missing.key")
+    with pytest.raises(ValueError, match="missing"):
+        runner(settings, client, storage).startup()
+    assert not (tmp_path / "missing.key").exists()
+    assert storage.get_setting("own_did") == ident.did
+
+
+def test_mismatched_database_identity_refused(settings, client, storage, tmp_path):
+    from agentscout.identity import Identity
+    ident, _ = Identity.load_or_create(str(tmp_path / "old.key"))
+    replacement, _ = Identity.load_or_create(str(tmp_path / "other.key"))
+    storage.set_setting("own_did", ident.did)
+    settings.expected_did = replacement.did
+    with pytest.raises(ValueError, match="database identity"):
+        runner(settings, client, storage).startup()
+    assert storage.get_setting("own_did") == ident.did
 
 
 class Notes:

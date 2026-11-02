@@ -23,7 +23,8 @@ def test_flop_provider_reports_unavailable_until_an_endpoint_is_advertised(stora
 
 
 def test_flop_provider_discovers_the_endpoint_from_agent_json(storage, tmp_path):
-    s = Settings(watch_rooms=["lobby"], db_path=str(tmp_path / "t.db"), inference_provider="flop")
+    s = Settings(watch_rooms=["lobby"], db_path=str(tmp_path / "t.db"), inference_provider="flop",
+                 flop_live_enabled=True, flop_allow_provisional_transport=True)
     p = make_provider(s, storage, None)
     storage.set_doc_snapshot("agent.json", json.dumps({"endpoints": {"inference": "/inference/run"}}), "2026-09-04T00:00Z")
     assert p.endpoint() == "/inference/run"
@@ -36,3 +37,21 @@ def test_flop_provider_discovers_the_endpoint_from_agent_json(storage, tmp_path)
 def test_radar_watches_for_inference_keywords():
     from agentscout.ingest import Ingestor
     assert all(k in Ingestor.DOC_KEYWORDS for k in ("inference", "compute", "gpu", "miner"))
+
+
+def test_flop_live_and_provisional_gates_precede_network_or_keys(storage, tmp_path, monkeypatch):
+    from agentscout import flopchain, flopsession
+    s = Settings(inference_provider="flop", flop_rpc_url="wss://unused.invalid", flop_miner_url="https://unused.invalid")
+    p = make_provider(s, storage, None)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("blocked provider must not connect or load keys")
+
+    monkeypatch.setattr(flopchain, "make_chain", forbidden)
+    with pytest.raises(InferenceUnavailable, match="spending is disabled"):
+        p.session()
+    s.flop_live_enabled = True
+    with pytest.raises(InferenceUnavailable, match="provisional FLOP transport is blocked"):
+        p.session()
+    with pytest.raises(flopsession.SessionError, match="provisional miner transport is disabled"):
+        flopsession.HttpMinerTransport("https://unused.invalid")

@@ -86,6 +86,12 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
 
 ## W5 — FLOP compute-channel client (2026-10-06, built the day flop.finance published the testnet/airdrop draft)
 
+**October 19 status:** this section records the original experimental design. Its draft wallet limits,
+stake and wire assumptions are not confirmed launch parameters or faucet quotas. Spending and the
+provisional transport are now separately gated off; the journal, exact exposure accounting and startup
+readiness check have changed. Follow [AIRDROP_OPERATIONS.md](AIRDROP_OPERATIONS.md) for current behavior
+and release acceptance. An official signed-HTTP adapter may replace the chain path entirely.
+
 34. **Why now.** flop.finance/airdrop (2026-10-05): the agent pool (1.2bn) is shared pro rata to *compute purchased in
     settled sessions* during the ~90-day testnet; faucet grants and holding earn nothing. The Yellow Paper's only agent
     metric is the same (E.38/E.40 placeholder). So the one thing to have ready on testnet day one is a client that can
@@ -113,9 +119,10 @@ Built 2026-08-25 against technocore.chat agent.json `version 0.7.0`. Deviations 
 38. **Dependencies.** `pyproject` optional group `flop = py-sr25519-bindings==0.2.4, substrate-interface==1.8.1` (pip's
     resolver report on python:3.12 linux/arm64, 2026-10-06: all 32 packages ship wheels — no compiler needed; the first
     install is slow only because the resolver backtracks through substrate-interface's loose pins). The
-    image still installs `.` (no new code in the live container during the hold). Go-live = set `FLOP_RPC_URL`,
-    `FLOP_MINER_URL`, `SCOUT_INFERENCE_PROVIDER=flop`, change the Dockerfile's `pip install .` to `.[flop]`, rebuild,
-    watch the smoke check; the first `flop_sessions` row in state CLOSED/SETTLED is the W5 definition of done.
-39. **Chain facts the client relies on** (Yellow Paper v0.5.0 + corpus): u128 base units are 10⁻¹⁸ FLOP; agent wallet
+    image still installs `.`. **Updated October 19:** adding endpoints and dependencies is insufficient for
+    go-live. The official onboarding/evidence interface, network pin, identity attribution, fee bounds and
+    independent finalized-settlement verifier must exist first. `CLOSED` only means receipt delivery;
+    local state labels do not prove eligibility. See [AIRDROP_OPERATIONS.md](AIRDROP_OPERATIONS.md).
+39. **Historical draft assumptions to revalidate at launch** (Yellow Paper v0.5.0 + corpus): u128 base units are 10⁻¹⁸ FLOP; agent wallet
     caps 100 FLOP/tx and 500 FLOP/day (defaults: 1 FLOP escrow/session, ≤100 sessions/day); identity stake 10 FLOP;
     session key ≤ 864,000 blocks; `settle` is the miner's extrinsic carrying our receipt; disputes are fraud-only.

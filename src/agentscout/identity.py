@@ -84,14 +84,29 @@ class Identity:
         self.fp = fingerprint(self.did)
 
     @classmethod
-    def load_or_create(cls, path: str) -> Tuple["Identity", bool]:
-        """Returns (identity, created). The file holds the 32-byte seed, base64, one line."""
+    def load_or_create(cls, path: str, *, allow_create: bool = True,
+                       expected_did: str = "") -> Tuple["Identity", bool]:
+        """Load an identity, optionally creating it for a first setup only.
+
+        An expected DID always forbids creation: a missing production volume must
+        never silently create a different participant. No secret is logged.
+        """
         p = Path(path)
+        if expected_did:
+            public_key_from_did(expected_did)
         if p.exists():
-            seed = base64.b64decode(p.read_text().strip())
+            try:
+                seed = base64.b64decode(p.read_text().strip(), validate=True)
+            except (ValueError, TypeError):
+                raise ValueError(f"{path}: invalid identity encoding") from None
             if len(seed) != 32:
                 raise ValueError(f"{path}: not a 32-byte Ed25519 seed")
-            return cls(Ed25519PrivateKey.from_private_bytes(seed)), False
+            ident = cls(Ed25519PrivateKey.from_private_bytes(seed))
+            if expected_did and ident.did != expected_did:
+                raise ValueError("identity differs from the expected DID; refusing to replace the participant")
+            return ident, False
+        if not allow_create or expected_did:
+            raise ValueError("existing identity key is missing; restore the original key before starting")
         key = Ed25519PrivateKey.generate()
         seed = key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
         p.parent.mkdir(parents=True, exist_ok=True)

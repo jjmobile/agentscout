@@ -96,16 +96,28 @@ class Summarizer:
 
     # ---- guards ------------------------------------------------------------------------------------
     def smoke(self) -> bool:
-        """One tiny structured call. Any failure disables LLM features for this run — never the agent."""
+        """Check readiness; FLOP never buys a synthetic startup request.
+
+        Anthropic retains its tiny structured call. FLOP constructs a guarded session only: network
+        identity/dependencies may be checked, but no channel, request reservation or miner call occurs.
+        Actual output validation belongs to the first useful request. Any failure disables LLM
+        features for this run, never the observer.
+        """
         if not self.enabled:
             return False
         try:
+            if self.s.inference_provider == "flop":
+                session = self.client.session()
+                if not callable(getattr(session, "run", None)):
+                    raise ValueError("FLOP provider did not produce a usable session")
+                log.info("FLOP provider readiness passed; no inference requested or settlement verified")
+                return True
             resp = self._parse(SmokeCheck, "Reply with ok=true and word='ready'.", max_tokens=64)
             out = resp.parsed_output
             self._ledger("smoke", None, resp, "OK", datetime.now(timezone.utc))
             if not (out and out.ok):
                 raise ValueError("unexpected smoke output")
-            log.info("claude smoke check passed (model %s)", self.s.model)
+            log.info("LLM smoke check passed (provider %s, model %s)", self.s.inference_provider, self.s.model)
             return True
         except Exception as exc:  # noqa: BLE001
             self.disable(f"smoke check failed: {exc.__class__.__name__}: {str(exc)[:160]}")
@@ -120,6 +132,10 @@ class Summarizer:
         return self.db.usage_usd_since(now.strftime("%Y-%m-%dT00:00:00Z"))
 
     def cost_guard_ok(self, now: datetime) -> bool:
+        if self.s.inference_provider == "flop":
+            # Every FLOP request is reserved in the integer-unit inference journal.
+            # An Anthropic USD estimate is neither a FLOP price nor its budget.
+            return True
         if not self.s.cost_guard_enabled:
             return True
         spent = self.spent_today_usd(now)
@@ -170,7 +186,9 @@ class Summarizer:
             name = exc.__class__.__name__
             status = getattr(exc, "status_code", None)
             self.db.record_summary_error(did, f"{name} {status or ''}".strip(), iso(now))
-            self.db.usage_insert(iso(now), "summary", did, self.s.model, 0, 0, 0, 0, 0.0, f"ERROR {name}")
+            model = "flop" if self.s.inference_provider == "flop" else self.s.model
+            suffix = " FLOP_JOURNAL" if self.s.inference_provider == "flop" else ""
+            self.db.usage_insert(iso(now), "summary", did, model, 0, 0, 0, 0, 0.0, f"ERROR {name}{suffix}")
             if name in ("AuthenticationError", "PermissionDeniedError", "NotFoundError", "BadRequestError"):
                 self.disable(f"{name}: {str(exc)[:160]}")
             else:
@@ -187,7 +205,8 @@ class Summarizer:
                                min(99, max(0, int(out.signal))), formatter.sanitize_label(out.rationale, 200), flags,
                                getattr(resp, "id", None))
         usd = self._ledger("summary", did, resp, "OK", now)
-        log.info("summary %s: %s / signal %d / %s ($%.4f)", f.fp, out.category, out.signal, ",".join(flags) or "-", usd)
+        cost = "FLOP exposure recorded in inference journal; settlement separate" if usd is None else f"${usd:.4f}"
+        log.info("summary %s: %s / signal %d / %s (%s)", f.fp, out.category, out.signal, ",".join(flags) or "-", cost)
         return "OK"
 
     # ---- SDK ---------------------------------------------------------------------------------------
@@ -203,12 +222,18 @@ class Summarizer:
             kwargs["output_config"] = {"effort": self.s.effort}
         return self.client.messages.parse(**kwargs)
 
-    def _ledger(self, purpose: str, did: Optional[str], resp, status: str, now: datetime) -> float:
+    def _ledger(self, purpose: str, did: Optional[str], resp, status: str, now: datetime) -> Optional[float]:
         u = getattr(resp, "usage", None)
         it = int(getattr(u, "input_tokens", 0) or 0)
         ot = int(getattr(u, "output_tokens", 0) or 0)
         cr = int(getattr(u, "cache_read_input_tokens", 0) or 0)
         cw = int(getattr(u, "cache_creation_input_tokens", 0) or 0)
+        if self.s.inference_provider == "flop":
+            # Keep the existing request-frequency counter without pretending token
+            # usage times Anthropic prices is a FLOP charge. Zero here means zero
+            # estimated Anthropic billing; all FLOP money is in the separate journal.
+            self.db.usage_insert(iso(now), purpose, did, "flop", it, ot, cr, cw, 0.0, status + " FLOP_JOURNAL")
+            return None
         usd = estimate_usd(self.s.model, self.pricing, it, ot, cr, cw)
         self.db.usage_insert(iso(now), purpose, did, self.s.model, it, ot, cr, cw, usd, status)
         return usd

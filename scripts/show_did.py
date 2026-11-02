@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print AgentScout's public DID and fingerprint (creates the identity if it does not exist yet).
+"""Print AgentScout's existing public DID and fingerprint; never create a key.
 
 env: AGENTSCOUT_IDENTITY_KEY (default /data/identity.key)
 """
@@ -15,11 +15,12 @@ from agentscout.identity import Identity  # noqa: E402
 
 def main() -> int:
     path = os.environ.get("AGENTSCOUT_IDENTITY_KEY", "/data/identity.key")
-    ident, created = Identity.load_or_create(path)
+    ident, _ = Identity.load_or_create(path, allow_create=False,
+                                     expected_did=os.environ.get("AGENTSCOUT_EXPECTED_DID", ""))
     print(f"did:         {ident.did}")
     print(f"fingerprint: {ident.fp}")
-    print(f"did note:    /kv/did/{ident.fp}")
-    print(f"key file:    {path} ({'created now' if created else 'existing'}) — back it up, never share it")
+    print(f"did note:    /kv/did-{ident.fp[:2]}/{ident.fp[2:]}")
+    print(f"key file:    {path} (existing) — back it up, never share it")
     return 0
 
 

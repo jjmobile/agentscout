@@ -135,7 +135,7 @@ MIGRATIONS: List[str] = [
         SELECT offer_id, day, offer_json, contract, accept_json, state, updated_at FROM tclk_deals;
     """,
     # 10: W5 — paid inference sessions on the FLOP compute channel (one row per channel; amounts are
-    #     u128 base-unit strings, hashes hex). The first SETTLED row is the airdrop-qualifying spend.
+    #     u128 base-unit strings, hashes hex). Historical labels are not proof of finality or allocation.
     """
     CREATE TABLE flop_sessions (
         channel_id TEXT PRIMARY KEY, day TEXT NOT NULL, miner TEXT NOT NULL, model TEXT,
@@ -144,6 +144,30 @@ MIGRATIONS: List[str] = [
         open_tx TEXT, settle_tx TEXT, error TEXT, opened_at TEXT NOT NULL, closed_at TEXT
     );
     CREATE INDEX flop_sessions_day ON flop_sessions(day);
+    """,
+    # 11: provider-neutral request/exposure journal. Integer amounts are TEXT: u128 exceeds SQLite INTEGER.
+    # Old session rows are deliberately unverified; their state alone cannot prove settlement or release liability.
+    """
+    CREATE TABLE inference_requests (
+        request_id TEXT PRIMARY KEY, provider TEXT NOT NULL, asset TEXT NOT NULL, decimals INTEGER NOT NULL,
+        network TEXT NOT NULL, account TEXT NOT NULL, channel_id TEXT UNIQUE, day TEXT NOT NULL,
+        state TEXT NOT NULL, escrow_base TEXT NOT NULL, fee_reserve_base TEXT NOT NULL,
+        liability_base TEXT NOT NULL, finalized_spend_base TEXT NOT NULL DEFAULT '0',
+        finalized_fees_base TEXT NOT NULL DEFAULT '0', intent_json TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, error TEXT
+    );
+    CREATE INDEX inference_requests_day ON inference_requests(day);
+    CREATE TABLE inference_events (
+        id INTEGER PRIMARY KEY, request_id TEXT NOT NULL REFERENCES inference_requests(request_id),
+        kind TEXT NOT NULL, payload_json TEXT NOT NULL, verification TEXT NOT NULL DEFAULT 'LOCAL',
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX inference_events_request ON inference_events(request_id, id);
+    INSERT INTO inference_requests(request_id,provider,asset,decimals,network,account,channel_id,day,state,
+        escrow_base,fee_reserve_base,liability_base,intent_json,created_at,updated_at,error)
+        SELECT 'legacy:' || channel_id,'legacy-flop','FLOP',18,'unknown','unknown',channel_id,day,
+        'LEGACY_UNVERIFIED',escrow_base,'0',escrow_base,'{}',opened_at,COALESCE(closed_at,opened_at),
+        'Historical state has no independently verified finality evidence; fees unknown' FROM flop_sessions;
     """,
 ]
 
@@ -168,8 +192,15 @@ class Storage:
         current = row["v"] or 0
         for idx, sql in enumerate(MIGRATIONS, start=1):
             if idx > current:
-                self.conn.executescript(sql)  # executescript commits by itself
-                self.conn.execute("INSERT INTO schema_version(version) VALUES (?)", (idx,))
+                # executescript implicitly commits a pre-existing transaction, so BEGIN and the
+                # version update must be inside the script. A crash cannot strand half a migration.
+                try:
+                    self.conn.executescript("BEGIN IMMEDIATE;\n" + sql
+                                            + f"\nINSERT INTO schema_version(version) VALUES ({idx});\nCOMMIT;")
+                except BaseException:
+                    if self.conn.in_transaction:
+                        self.conn.execute("ROLLBACK")
+                    raise
 
     # ---- settings --------------------------------------------------------------------
     def get_setting(self, key: str) -> Optional[str]:
@@ -735,15 +766,30 @@ class Storage:
     # ---- W5 flop sessions ------------------------------------------------------------
     def flop_next_channel_nonce(self) -> int:
         """Monotonic per-account channel nonce (F.1 binds it into channel_id); never reused."""
-        n = int(self.get_setting("flop_channel_nonce") or "0") + 1
-        self.set_setting("flop_channel_nonce", str(n))
-        return n
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            n = int(self.get_setting("flop_channel_nonce") or "0") + 1
+            self.set_setting("flop_channel_nonce", str(n))
+            self.conn.execute("COMMIT")
+            return n
+        except Exception:
+            self.conn.execute("ROLLBACK")
+            raise
 
     def flop_session_open(self, channel_id: str, miner: str, model: str, escrow_base: int, nonce: int, open_tx: str,
-                          agent_key: str, now: str) -> None:
+                          agent_key: str, now: str, state: str = "OPEN") -> None:
         self.conn.execute(
             "INSERT INTO flop_sessions(channel_id,day,miner,model,escrow_base,nonce,agent_key,state,open_tx,opened_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (channel_id, now[:10], miner, model, str(escrow_base), nonce, agent_key, "OPEN", open_tx, now))
+            (channel_id, now[:10], miner, model, str(escrow_base), nonce, agent_key, state, open_tx, now))
+
+    def flop_session_opened(self, channel_id: str, open_tx: str) -> None:
+        self.conn.execute("UPDATE flop_sessions SET state='OPEN', open_tx=? WHERE channel_id=?", (open_tx, channel_id))
+
+    def flop_session_receipt(self, channel_id: str, turns: int, aggregate_gn: str, final_root: str,
+                             payable: str, receipt_sig: str) -> None:
+        self.conn.execute(
+            "UPDATE flop_sessions SET state='RECEIPT_READY',turns=?,aggregate_gn=?,final_root=?,payable=?,receipt_sig=? WHERE channel_id=?",
+            (turns, aggregate_gn, final_root, payable, receipt_sig, channel_id))
 
     def flop_session_close(self, channel_id: str, turns: int, aggregate_gn: str, final_root: str, payable: str,
                            receipt_sig: str, settle_tx: str, now: str) -> None:
@@ -751,17 +797,14 @@ class Storage:
             "UPDATE flop_sessions SET state='CLOSED', turns=?, aggregate_gn=?, final_root=?, payable=?, receipt_sig=?, settle_tx=?, closed_at=? WHERE channel_id=?",
             (turns, aggregate_gn, final_root, payable, receipt_sig, settle_tx, now, channel_id))
 
-    def flop_session_fail(self, channel_id: str, error: str, now: str) -> None:
-        self.conn.execute("UPDATE flop_sessions SET state='FAILED', error=?, closed_at=? WHERE channel_id=?", (error, now, channel_id))
-
-    def flop_session_settled(self, channel_id: str, now: str) -> None:
-        self.conn.execute("UPDATE flop_sessions SET state='SETTLED', closed_at=COALESCE(closed_at,?) WHERE channel_id=?", (now, channel_id))
+    def flop_session_fail(self, channel_id: str, error: str, now: str, state: str = "FAILED") -> None:
+        self.conn.execute("UPDATE flop_sessions SET state=?, error=?, closed_at=? WHERE channel_id=?", (state, error, now, channel_id))
 
     def flop_session(self, channel_id: str) -> Optional[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM flop_sessions WHERE channel_id=?", (channel_id,)).fetchone()
 
     def flop_sessions_today(self, day: str) -> int:
-        return self.conn.execute("SELECT COUNT(*) AS n FROM flop_sessions WHERE day=? AND state!='FAILED'", (day,)).fetchone()["n"]
+        return self.conn.execute("SELECT COUNT(*) AS n FROM flop_sessions WHERE day=?", (day,)).fetchone()["n"]
 
     def flop_sessions_recent(self, limit: int = 20) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM flop_sessions ORDER BY opened_at DESC LIMIT ?", (limit,)).fetchall()

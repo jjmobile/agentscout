@@ -6,6 +6,9 @@ RUN groupadd --gid 10001 agentscout \
  && mkdir -p /data && chown 10001:10001 /data
 
 WORKDIR /app
+ARG AGENTSCOUT_SOURCE_REVISION=unknown
+ENV AGENTSCOUT_SOURCE_REVISION=$AGENTSCOUT_SOURCE_REVISION
+LABEL org.opencontainers.image.revision=$AGENTSCOUT_SOURCE_REVISION
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 COPY scripts ./scripts

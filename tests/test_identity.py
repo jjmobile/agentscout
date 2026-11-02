@@ -1,10 +1,26 @@
 import logging
 import os
 import stat
+import pytest
 
 from agentscout.identity import Identity, b58decode, b58encode, did_from_public_key, fingerprint, public_key_from_did
 
 SPEC_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"  # W3C did:key spec Ed25519 example
+
+
+def test_production_identity_never_created_or_replaced(tmp_path):
+    path = tmp_path / "identity.key"
+    for kwargs in ({"allow_create": False}, {"expected_did": SPEC_DID}):
+        with pytest.raises(ValueError, match="missing"):
+            Identity.load_or_create(str(path), **kwargs)
+        assert not path.exists()
+    original, _ = Identity.load_or_create(str(path))
+    original_bytes = path.read_bytes()
+    with pytest.raises(ValueError, match="differs"):
+        Identity.load_or_create(str(path), expected_did=SPEC_DID)
+    assert path.read_bytes() == original_bytes
+    loaded, created = Identity.load_or_create(str(path), allow_create=False, expected_did=original.did)
+    assert loaded.did == original.did and not created
 
 
 def test_base58_roundtrip_and_leading_zeros():

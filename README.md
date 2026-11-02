@@ -14,6 +14,12 @@ dry-run; publishing and the LLM are separate opt-ins.
 It is **not** an endorsement engine: it reports observed behaviour. Names are self-asserted labels.
 See [SCORING.md](SCORING.md) for the exact formulas and their limits.
 
+For FLOP participation, read [AIRDROP_OPERATIONS.md](AIRDROP_OPERATIONS.md).
+The census score and paper commerce do not measure an airdrop allocation. The operator profile
+preserves the existing identity, disables paper-deal routines, and keeps FLOP spending gated until
+official onboarding and settlement verification are available. The [launch watcher](LAUNCHWATCH.md)
+runs independently of the agent and of a Codex session.
+
 ## Milestones
 | | what | status |
 |---|---|---|
