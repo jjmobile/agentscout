@@ -272,3 +272,12 @@ def test_notify_all_succeeds_if_one_channel_works(monkeypatch):
     monkeypatch.setattr(lw, "notify_macos", lambda m: (_ for _ in ()).throw(TimeoutError()))
     with pytest.raises(ValueError):
         lw.notify_all("hi")
+
+
+def test_commit_feed_tracks_sha_and_rejects_errors():
+    source = lw.Source("yellowpaper_commits", "https://api.github.com/repos/flop-labs/yellowpaper/commits", "commits")
+    row = {"sha": "a1", "commit": {"committer": {"date": "2026-11-05"}, "message": "sync\n\nbody"}}
+    a = lw.normalize(source, json.dumps([row]))
+    assert '"message": "sync"' in a and a != lw.normalize(source, json.dumps([dict(row, sha="b2")]))
+    with pytest.raises(ValueError):
+        lw.normalize(source, '{"message": "API rate limit exceeded"}')

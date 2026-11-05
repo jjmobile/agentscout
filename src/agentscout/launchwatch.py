@@ -58,6 +58,8 @@ SOURCES = (
     Source("yellowpaper_mirror", "https://raw.githubusercontent.com/flop-labs/yellowpaper/main/yellowpaper.md",
            "text", ("R8.4", "E.38")),
     Source("official_repositories", "https://api.github.com/orgs/flop-labs/repos?per_page=100", "repos"),
+    # Every commit to the spec repo (params YAML and evidence corpus too, not only yellowpaper.md).
+    Source("yellowpaper_commits", "https://api.github.com/repos/flop-labs/yellowpaper/commits?per_page=20", "commits"),
     Source("yellowpaper_releases", "https://api.github.com/repos/flop-labs/yellowpaper/releases?per_page=20", "releases"),
     Source("technocore_releases", "https://api.github.com/repos/flop-labs/technocore-chat/releases?per_page=20", "releases"),
     # Public faucet chain descriptor: flips network/genesis/rpc when the faucet moves from devnet to testnet.
@@ -196,6 +198,13 @@ class VisibleText(HTMLParser):
 
 
 def normalize(source: Source, body: str) -> str:
+    if source.kind == "commits":
+        value = json.loads(body)
+        if not isinstance(value, list) or any(not isinstance(row, dict) or not row.get("sha") for row in value):
+            raise ValueError("expected GitHub commit list, received error or invalid response")
+        rows = [{"sha": row["sha"], "date": (row.get("commit") or {}).get("committer", {}).get("date"),
+                 "message": str((row.get("commit") or {}).get("message", "")).split("\n")[0][:200]} for row in value]
+        return json.dumps(rows, indent=2, sort_keys=True, ensure_ascii=False)
     if source.kind in ("repos", "releases"):
         value = json.loads(body)
         if not isinstance(value, list):
