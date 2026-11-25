@@ -1,40 +1,25 @@
 # FLOP participation operations
 
-Updated 21 October 2026. The operator authorized the five-step strategy. This build prepares the existing
-identity, launch monitoring, useful work, and durable spending evidence. It does not contain an official
-testnet faucet client or production settlement verifier: their published contracts are still required.
-The [official network status](https://ask.flop.finance/docs/network-testnet) remains the launch check;
-the November 3 working target is not permission to enable an invented API.
+This build prepares the existing identity, launch monitoring, useful work, and durable spending
+evidence. It does not contain an official testnet faucet client or production settlement verifier:
+their published contracts are still required. The [official network status](https://ask.flop.finance/docs/network-testnet)
+remains the launch check; a target date is not permission to enable an invented API.
 
-## Activation status
+## Activation
 
-The existing identity backup passed a local signing and verification check. Two useful jobs are saved
-in `.airdrop/workloads.db`; repeated preparation creates no duplicates. Offline checks cover the new
-guards, journal, workload queue, status report and watcher. No paid inference has been performed.
-
-**Watcher activation verified; container deployment still unverified.** The October 19 follow-up
-confirmed the login LaunchAgent is loaded with notifications enabled, its first run exited 0, and
-all 11 official sources were fetched successfully at 06:29:20 UTC (14:29:20 Taipei). This workspace
-still cannot access the Docker daemon, so the new image and deployed profile remain unverified.
-The original in-session bootstrap failed with error 5; the subsequent host installation succeeded.
-At the October 21 shutdown handoff, watcher health remained healthy: all 11 sources last fetched
-successfully at 02:32:13 UTC / 10:32:13 Taipei, with heartbeat at 04:22:21 UTC. The prepared code remains
-uncommitted on `main` at base commit `aef9e0d`; do not discard the working-tree implementation.
-To install or reapply the setup from the operator's normal macOS Terminal with Docker Desktop available:
+To install or reapply the setup from a normal macOS Terminal with Docker Desktop available, run from
+this directory:
 
 ```sh
-sh /Users/jjhuus/work/technocore/agentscout/scripts/activate_airdrop.sh
+sh scripts/activate_airdrop.sh
 ```
 
 This installs the watcher for future logins with local macOS notifications, applies the operator
 profile, checks the existing identity and prints status. It stops if an operation fails; rerunning
 is supported. Service installation and successful source fetches are separate checks. FLOP spending
 stays disabled after activation. Review the printed container health and source status; neither
-the script nor its existence is evidence of earned allocation.
-
-Validation on October 19: **299 tests passed, one skipped** (the local environment lacks
-`py-sr25519-bindings`). The required syntax/name lint gate, patch whitespace check, shell syntax
-and merged Compose validation passed. These are offline checks, not a live protocol or deployment test.
+the script nor its existence is evidence of earned allocation. Offline tests, lint and Compose
+validation are not a live protocol or deployment test.
 
 ## Identity and deployment
 
@@ -72,16 +57,14 @@ The standalone watcher does not need the agent container, credentials, a browser
 It records failed fetches honestly and never changes spending settings based on web text.
 The default installer only generates a repo-local plist; `--apply` loads it for the current login.
 The activation command above explicitly uses `--install-at-login` to install this one watcher in the
-user's LaunchAgents directory. That host installation is now verified.
+user's LaunchAgents directory.
 
 Alerts are local macOS notifications titled **AgentScout FLOP monitor**, on official-source changes
 and monitoring-health transitions. Sources are fetched every two hours; the initial healthy baseline
-is silent. This watcher sends no Telegram, email, phone or Codex-chat messages. A notification test
-from the coding session failed with AppleScript error -2741, but scheduled host runs subsequently
-recorded successful native notification requests, most recently October 20 at 12:31:18 UTC / 20:31:18
-Taipei. User-visible delivery remains unverified. Focus/notification settings can suppress presentation, and a stopped
-watcher or sleeping Mac cannot deliver an alert. Review the named sources when a change alert appears;
-the watcher does not infer that a faucet is live or decide an action automatically.
+is silent. This watcher sends no Telegram, email, phone or chat messages. A recorded notification
+request does not prove user-visible delivery: Focus/notification settings can suppress presentation,
+and a stopped watcher or sleeping Mac cannot deliver an alert. Review the named sources when a change
+alert appears; the watcher does not infer that a faucet is live or decide an action automatically.
 
 ## Useful work
 
