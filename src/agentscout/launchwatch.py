@@ -51,7 +51,8 @@ SOURCES = (
     Source("airdrop", "https://flop.finance/airdrop/", required=("genesis", "airdrop")),
     Source("testnet", "https://flop.finance/testnet/", required=("testnet", "FLOP")),
     Source("timeline", "https://ask.flop.finance/docs/testnet-and-timeline", required=("testnet", "timeline")),
-    Source("network_status", "https://ask.flop.finance/docs/network-testnet", required=("testnet", "status")),
+    # Became the "Testnet opening FAQ" on 2026-11-24 (no "status" wording); genesis hash is now on it.
+    Source("network_status", "https://ask.flop.finance/docs/network-testnet", required=("testnet", "genesis")),
     Source("agent_onboarding", "https://ask.flop.finance/docs/agent-integration", required=("agent", "FLOP")),
     Source("operator_hub", "https://ask.flop.finance/operators", required=("operator", "network")),
     Source("yellowpaper_web", "https://flop.finance/intro/yellowpaper/", required=("R8.4", "E.38")),
